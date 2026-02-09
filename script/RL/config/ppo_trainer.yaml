@@ -1,0 +1,52 @@
+trainer:  
+  project_name: "scene_editing_vlm"  
+  experiment_name: "blender_scene_rl"  
+  total_epochs: 15  
+  n_gpus_per_node: 8  
+  nnodes: 1  
+  save_freq: 5  
+  test_freq: 1  
+  val_before_train: true  
+  
+# Actor和Rollout配置  
+actor_rollout_ref:  
+  model:  
+    path: "Qwen/Qwen2.5-VL-7B-Instruct"  # 使用VLM模型  
+    trust_remote_code: true  
+    enable_gradient_checkpointing: true  
+      
+  rollout:  
+    name: sglang  # 必须使用sglang支持多轮交互  
+    mode: async   # 异步模式以支持Blender渲染等待  
+    tensor_model_parallel_size: 2  
+    gpu_memory_utilization: 0.85  
+    temperature: 1.0  
+    top_p: 0.9  
+    n: 1  
+      
+    # 多轮交互配置  
+    multi_turn:  
+      enable: true  
+      max_assistant_turns: 10  
+      max_user_turns: 10  
+      interaction_config_path: "./config/scene_editing_interaction.yaml"  
+      use_inference_chat_template: false  
+      format: hermes  
+        
+    val_kwargs:  
+      temperature: 0.0  
+      top_p: 1.0  
+      n: 1  
+  
+# 数据配置  
+data:  
+  train_files: "./data/scene_editing_train.parquet"  
+  val_files: "./data/scene_editing_val.parquet"  
+  prompt_key: prompt  
+  max_prompt_length: 1024  
+  max_response_length: 2048  
+  train_batch_size: 128  
+  return_raw_chat: true  # 必须为true以支持多轮对话  
+  return_multi_modal_inputs: false  # 必须为false以避免与动态生成的图像冲突  
+  image_key: images  
+  trust_remote_code: true

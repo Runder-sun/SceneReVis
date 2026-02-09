@@ -1,0 +1,64 @@
+interaction:
+  - name: "scene_editing"
+    class_name: "verl.interactions.scene_editing_interaction.SceneEditingInteraction"
+    config:
+      verbose: true
+      output_dir: "/path/to/storage/rl_output_scene_editing/debug"
+      physics_mode: trimesh
+      use_objaverse: true
+      
+      # ========== 交互轮次配置 ==========
+      max_turns: 7  # 最大交互轮数
+      
+      # ========== 反馈注入配置 ==========
+      # 控制是否将物理/VLM反馈注入到下一轮的输入中
+      # 如果模型对反馈信息产生OOD行为（如空tool call），可以关闭这些开关
+      feedback_injection:
+        enabled: false                    # 总开关：是否启用反馈注入机制
+        physics_feedback_enabled: true   # 是否注入物理反馈（碰撞、出界信息）
+        layout_feedback_enabled: true    # 是否注入VLM布局反馈
+      
+      # ========== VLM Judge 配置 ==========
+      vlm_judge_enabled: true
+      vlm_judge_url: "http://localhost:8000/v1/chat/completions"
+      vlm_judge_model: "Qwen/Qwen2.5-VL-72B-Instruct"
+      vlm_judge_timeout: 60
+      
+      # ========== 统一路径配置 ==========
+      # 迁移到新服务器时，只需修改此处的路径即可
+      # 优先级：配置文件值 > 环境变量 > 默认硬编码路径
+      paths:
+        # Objaverse 资产路径配置
+        objaverse:
+          # 基础目录（包含 glbs/, 2023_09_23/ 等子目录）
+          base_dir: "/path/to/datasets/objathor-assets"
+          
+          # GLB 缓存目录（可选，默认为 base_dir/glbs）
+          glb_cache_dir: "/path/to/datasets/objathor-assets/glbs"
+          
+          # 资产版本号
+          assets_version: "2023_09_23"
+          
+          # Holodeck 版本号（用于 THOR 资产）
+          holodeck_version: "2023_09_23"
+        
+        # 3D-FUTURE 资产路径配置（非 Objaverse 模式使用）
+        3d_future:
+          # 模型目录（包含各个模型 ID 子目录）
+          models_dir: "/path/to/datasets/3d-front/3D-FUTURE-model"
+          
+          # 元数据文件路径
+          metadata_json: "/path/to/datasets/llmscene/metadata/model_info_3dfuture_assets.json"
+          metadata_scaled_json: "/path/to/datasets/llmscene/metadata/model_info_3dfuture_assets_scaled.json"
+          embeddings_pkl: "/path/to/datasets/llmscene/metadata/model_info_3dfuture_assets_embeds.pickle"
+        
+        # Blender 配置
+        blender:
+          # Blender 可执行文件路径（Azure 集群上通常在用户目录下安装）
+          executable: null  # 使用自动检测，或设置为具体路径如 "/home/user/.local/bin/blender"
+          
+          # 额外的 Blender 搜索路径
+          candidates: []
+        
+        # 日志目录
+        logs_dir: "/path/to/logs"

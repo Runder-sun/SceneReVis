@@ -1,0 +1,27 @@
+Pillow>=10.0.0
+scipy>=1.11.0
+trimesh>=3.23.0
+shapely>=2.0.0
+transformers>=4.57.1
+python-dotenv>=1.0.0
+matplotlib>=3.7.0
+torch-memory-saver
+triangle
+# pybase64
+# sgl-kernel==0.1.4
+triton
+orjson
+python-multipart
+pybind11
+swanlab
+qwen_vl_utils
+python-fcl
+# tensordict>=0.8.0,<=0.10.0,!=0.9.0
+# flashinfer-python>=0.2.9
+
+# Objaverse asset retrieval dependencies
+compress-json>=1.0.0
+compress-pickle>=2.0.0
+open-clip-torch>=2.20.0
+sentence-transformers>=2.2.0
+objaverse>=0.1.7

@@ -1,0 +1,16 @@
+# Main Dependencies based on Recommended versions
+torch>=2.7.1
+transformers>=4.57.0
+flash-attn==2.7.4.post1 # 注意：包名通常是 flash-attn
+trl>=0.20.0
+deepspeed>=0.16.9
+
+# Dependencies with no recommended version, using range
+modelscope>=1.23
+peft>0.11,<0.18
+evalscope>=0.11
+qwen_vl_utils
+mpi4py
+openmpi
+swanlab
+msgspec

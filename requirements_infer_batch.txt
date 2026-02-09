@@ -1,0 +1,132 @@
+# ========================================================
+# requirements_infer_batch.txt
+# 用于远程服务器推理的环境依赖
+# 适用于 infer_batch.py 批量场景生成脚本
+# ========================================================
+
+# ===== Core ML Framework =====
+# ms-swift: ModelScope SWIFT 框架，用于模型推理
+ms-swift>=3.2.0
+
+# PyTorch: 深度学习框架
+torch>=2.1.0,<2.8.0
+
+# Transformers: Hugging Face 模型库
+transformers>=4.46.0,<4.60.0
+
+# vLLM: 高性能大语言模型推理引擎（用于 VllmEngine）
+vllm>=0.6.0
+
+# ===== Azure OpenAI =====
+# 用于调用 Azure OpenAI API（如 GPT-4o 生成初始场景）
+openai>=1.0.0
+azure-identity>=1.12.0
+
+# ===== Model Support =====
+# ModelScope: 模型下载和管理
+modelscope>=1.23
+
+# PEFT: 参数高效微调（LoRA 等）
+peft>0.11,<0.18
+
+# Qwen VL Utils: Qwen2.5-VL 模型工具
+qwen_vl_utils==0.0.11
+
+# ===== Physics & 3D Processing =====
+# Trimesh: 3D 网格处理（用于物理验证和碰撞检测）
+trimesh>=4.0.0
+
+# NumPy: 数值计算（注意版本限制避免兼容性问题）
+numpy<2.0.0
+
+# SciPy: 科学计算（用于旋转变换等）
+scipy>=1.10.0
+
+# Shapely: 几何计算（用于多边形碰撞检测）
+shapely>=2.0.0
+
+# ===== Image Processing =====
+# Pillow: 图像处理
+Pillow>=9.0.0
+
+# ===== Distributed Training & Inference =====
+# DeepSpeed: 分布式训练加速
+deepspeed>=0.16.0
+
+# Accelerate: Hugging Face 分布式训练工具
+accelerate>=0.30.0
+
+# Flash Attention: 高效注意力机制（需要 CUDA）
+# 注意：flash-attn 需要从源码编译或使用预编译 wheel
+flash-attn>=2.7.0
+
+# ===== Logging & Monitoring =====
+# SwanLab: 实验跟踪
+swanlab
+
+# Weights & Biases: 实验跟踪和可视化
+wandb
+
+# ===== Utilities =====
+# msgspec: 高性能消息序列化
+msgspec
+
+# Requests: HTTP 请求库
+requests
+
+# PyBind11: C++ 绑定（部分依赖需要）
+pybind11
+
+# ===== Optional: CLIP for Asset Retrieval =====
+# 如果使用 3D-FUTURE 资产检索，需要 CLIP
+# open-clip-torch>=2.0.0
+# ftfy
+
+# ===== Optional: Objaverse Asset Retrieval =====
+# 如果使用 Objaverse 资产检索
+# objaverse>=0.1.7
+
+# ========================================================
+# 安装说明
+# ========================================================
+#
+# 1. 基础安装：
+#    pip install -r requirements_infer_batch.txt
+#
+# 2. Flash Attention 安装（需要 CUDA）：
+#    pip install flash-attn --no-build-isolation
+#
+# 3. Blender 安装（用于场景渲染）：
+#    bash quick_install_blender.sh
+#
+# 4. 验证安装：
+#    python -c "from swift.llm import VllmEngine; print('Swift OK')"
+#    python -c "import vllm; print('vLLM OK')"
+#    python -c "import torch; print(f'PyTorch OK, CUDA: {torch.cuda.is_available()}')"
+#
+# ========================================================
+# 运行示例
+# ========================================================
+#
+# 单卡推理：
+#   python infer_batch.py --batch-mode --parallel \
+#       --model /path/to/storage/ckpt/rl_v3_2 \
+#       --prompts-file /path/to/storage/datasets/llmscene/sft/test_prompt_v2.txt \
+#       --iterations 10 --output ./output/batch_results
+#
+# 4卡并行推理（4x A100）：
+#   python infer_batch.py --batch-mode --parallel \
+#       --model /path/to/storage/ckpt/rl_v3_2 \
+#       --tensor-parallel 4 \
+#       --max-batch-size 4 \
+#       --max-history-turns 4 \
+#       --prompts-file /path/to/storage/datasets/llmscene/sft/test_prompt_v2.txt \
+#       --iterations 10 --output ./output/batch_results
+#
+# 使用 Objaverse 资产：
+#   python infer_batch.py --batch-mode --parallel \
+#       --asset-source objaverse \
+#       --model /path/to/storage/ckpt/rl_v3_2 \
+#       --prompts-file /path/to/storage/datasets/llmscene/sft/test_prompt_v2.txt
+#
+# ========================================================
