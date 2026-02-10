@@ -2,6 +2,9 @@
 
 **SceneReVis: Iterative 3D Indoor Scene Generation with Vision-Language Reinforcement Learning**
 
+[![Model](https://img.shields.io/badge/🤗%20Model-SceneReVis--7B-yellow)](https://huggingface.co/runder1/SceneReVis-7B)
+[![Dataset](https://img.shields.io/badge/🤗%20Dataset-SceneChain--12K-blue)](https://huggingface.co/datasets/runder1/SceneChain-12K)
+
 A closed-loop framework for generating physically plausible and aesthetically coherent 3D indoor scenes through multi-turn iterative refinement. The system combines Vision-Language Model (VLM) reasoning, physics-based validation, and structured tool calls to produce high-quality 3D room layouts.
 
 ---
@@ -88,26 +91,74 @@ SceneReVis/
 
 ### 1. Environment Setup
 
+SceneReVis requires **three separate conda environments** for different tasks:
+
+#### Environment 1: Inference
+
 ```bash
-# Create conda environment
 conda create -n scenerevis python=3.11 -y
 conda activate scenerevis
 
-# Install core dependencies
+# Install from requirements file
+pip install -r requirements_infer_batch.txt
+
+# Or install core dependencies manually
 pip install ms-swift vllm accelerate deepspeed
 pip install openai azure-identity
 pip install trimesh scipy shapely pillow numpy
 pip install compress_json compress_pickle open_clip_torch sentence-transformers
 pip install swanlab msgspec python-fcl
+```
 
-# Or install from requirements file
-pip install -r requirements_infer_batch.txt
+#### Environment 2: SFT Training
 
-# Install Blender 4.0.2 for rendering (no sudo required)
+```bash
+conda create -n scenerevis_sft python=3.11 -y
+conda activate scenerevis_sft
+
+# Install ms-swift framework
+pip install ms-swift
+
+# Install SFT dependencies
+pip install -r script/sft/requirements.txt
+```
+
+#### Environment 3: RL Training (VERL)
+
+```bash
+conda create -n verl python=3.12 -y
+conda activate verl
+
+# Install VERL framework (official install script first)
+cd verl
+USE_MEGATRON=0 bash scripts/install_vllm_sglang_mcore.sh
+pip install --no-deps -e .
+cd ..
+
+# Install RL-specific dependencies
+cd script/RL/
+pip install -r requirements.txt
+cd ../..
+```
+
+#### Blender Installation (Required for all environments)
+
+Blender 4.0.2 is required for scene rendering. Install it and configure the environment variables:
+
+```bash
+# Install system dependencies (requires sudo)
+apt-get update && apt-get install -y --no-install-recommends \
+    libegl1 libxrender1 libxfixes3 libxi6 libxext6 libgl1 \
+    libglib2.0-0 libsm6 libxkbcommon0 libx11-6 libx11-xcb1 \
+    libfontconfig1 libfreetype6 libdbus-1-3
+
+# Install Blender 4.0.2 (no sudo required)
 bash quick_install_blender.sh
 
-# (Optional) Install VERL framework for RL training
-cd verl && pip install -e . && cd ..
+# Add Blender to PATH
+echo 'export PATH=$HOME/.local/blender/blender-4.0.2-linux-x64:$PATH' >> ~/.bashrc
+echo 'export BLENDER_EXECUTABLE=$HOME/.local/blender/blender-4.0.2-linux-x64/blender' >> ~/.bashrc
+source ~/.bashrc
 ```
 
 ### 2. Download & Prepare Assets
@@ -182,7 +233,7 @@ The fine-tuned model generates the initial scene layout (room + objects), then i
 ```bash
 python infer.py \
     --prompt "Design a cozy bedroom with a queen bed and reading corner" \
-    --model /path/to/checkpoint \
+    --model runder1/SceneReVis-7B \
     --iterations 10 \
     --generate-room \
     --use-model-for-creation \
@@ -196,7 +247,7 @@ Use GPT (Azure OpenAI) to generate the initial complete scene with furniture obj
 ```bash
 python infer.py \
     --prompt "Design a cozy bedroom with a queen bed and reading corner" \
-    --model /path/to/checkpoint \
+    --model runder1/SceneReVis-7B \
     --iterations 10 \
     --generate-room \
     --use-gpt-with-objects \
@@ -210,7 +261,7 @@ Enable GPT-assisted physics optimization after each iteration to automatically r
 ```bash
 python infer.py \
     --prompt "Design a modern living room with a sectional sofa" \
-    --model /path/to/checkpoint \
+    --model runder1/SceneReVis-7B \
     --iterations 10 \
     --generate-room \
     --use-model-for-creation \
@@ -231,7 +282,7 @@ Process multiple prompts from a file sequentially:
 ```bash
 python infer.py \
     --batch-mode \
-    --model /path/to/checkpoint \
+    --model runder1/SceneReVis-7B \
     --prompts-file split_prompts/bedroom.txt \
     --output ./output/bedroom \
     --iterations 15 \
@@ -271,21 +322,37 @@ python eval/vlm_scene_eval.py \
 
 #### SFT (Supervised Fine-Tuning)
 
-Training data: **SceneChain-12K** — 11,444 multi-turn scene editing conversation trajectories with rendered images.
+Training data: [**SceneChain-12K**](https://huggingface.co/datasets/runder1/SceneChain-12K) — 11,444 multi-turn scene editing conversation trajectories with ~80K rendered images.
 
 ```bash
-# Run SFT training
+# Download training dataset from HuggingFace
+huggingface-cli download runder1/SceneChain-12K --repo-type dataset --local-dir ./data/SceneChain-12K
+
+# Activate SFT environment
+conda activate scenerevis_sft
+
+# Run SFT training (edit script/sft/sft_B200.sh to set --dataset path)
 bash script/sft/sft_B200.sh
 ```
 
 #### RL (Reinforcement Learning with GRPO)
 
 ```bash
-# Install VERL first
-cd verl && pip install -e . && cd ..
+# Activate RL environment
+conda activate verl
 
-# Run GRPO training
-bash script/RL/run_grpo_B200.sh
+# Run GRPO training (requires SFT checkpoint as base)
+cd script/RL/
+bash run_grpo_B200.sh
+```
+
+#### Pre-trained Model
+
+You can skip training and directly download our pre-trained model (SFT + RL):
+
+```bash
+# Download the SceneReVis-7B checkpoint
+huggingface-cli download runder1/SceneReVis-7B --local-dir ./ckpt/SceneReVis-7B
 ```
 
 ---

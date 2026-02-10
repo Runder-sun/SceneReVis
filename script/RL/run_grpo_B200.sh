@@ -6,7 +6,7 @@ export SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK=True
 export VERL_LOGGING_LEVEL=INFO
 export VLLM_USE_V1=1
 
-# 1. 每次启动前清理环境，防止显存碎片
+# 1. Clean up environment before each launch to prevent GPU memory fragmentation
 pkill -f "ray" || true
 pkill -f "sglang" || true
 sleep 5
@@ -14,7 +14,7 @@ sleep 5
 set -x
 ulimit -n 65535
 
-# 路径配置
+# Path configuration
 INTERACTION_CONFIG=/path/to/workspace/llmscene/script/RL/config/scene_editing_interaction_B200.yaml
 MODEL_PATH=/path/to/data/ckpt/sft/sft_output_b200_8card_50k/v1-20251210-195003/checkpoint-849
 TRAIN_DATA=[/path/to/data/datasets/rl/scene_editing_train_v2.parquet,/path/to/data/datasets/rl/scene_editing_train_ood.parquet]
@@ -25,7 +25,7 @@ MAX_RESPONSE_LEN=40960
 ACTOR_MAX_TOKEN=51200
 INFER_MAX_TOKEN=51200
 
-# === [修改 1] 使用 4 卡 ===
+# === [Modification 1] Use 4 GPUs ===
 CUDA_VISIBLE_DEVICES=0,1,2,3 python3 -m verl.trainer.main_ppo \
     custom_reward_function.path="scene_reward.py" \
     custom_reward_function.name="compute_score" \

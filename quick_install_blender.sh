@@ -1,17 +1,17 @@
 #!/bin/bash
-# quick_install_blender.sh - 快速安装 Blender（适用于无 sudo 权限的环境）
+# quick_install_blender.sh - Quick Blender installation (for environments without sudo privileges)
 
 set -e
 
 echo "🔧 Quick Blender Installation for Cluster"
 
-# 尝试使用预编译的便携版
+# Try using the pre-compiled portable version
 BLENDER_VERSION="4.0.2"
 INSTALL_DIR="${HOME}/.local/blender"
 BLENDER_DIR="${INSTALL_DIR}/blender-${BLENDER_VERSION}-linux-x64"
 BLENDER_BIN="${BLENDER_DIR}/blender"
 
-# 检查是否已安装在系统PATH中
+# Check if already installed in system PATH
 if command -v blender &> /dev/null; then
     echo "✓ Blender already available in PATH"
     export BLENDER_EXECUTABLE=$(which blender)
@@ -19,7 +19,7 @@ if command -v blender &> /dev/null; then
     exit 0
 fi
 
-# 检查是否已经存在本地安装
+# Check if local installation already exists
 if [ -d "${BLENDER_DIR}" ]; then
     echo "✓ Blender directory found at ${BLENDER_DIR}"
     if [ -f "${BLENDER_BIN}" ]; then
@@ -36,7 +36,7 @@ if [ -d "${BLENDER_DIR}" ]; then
     fi
 fi
 
-# 下载并安装
+# Download and install
 echo "Downloading Blender ${BLENDER_VERSION} (portable version)..."
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
@@ -44,10 +44,10 @@ cd "${INSTALL_DIR}"
 BLENDER_ARCHIVE="blender-${BLENDER_VERSION}-linux-x64.tar.xz"
 DOWNLOAD_URL="https://download.blender.org/release/Blender4.0/${BLENDER_ARCHIVE}"
 
-# 清理可能存在的旧下载文件
+# Clean up possibly existing old download files
 rm -f "${BLENDER_ARCHIVE}"
 
-# 使用 wget 或 curl 下载
+# Download using wget or curl
 if command -v wget &> /dev/null; then
     echo "Using wget to download..."
     wget -q --show-progress "${DOWNLOAD_URL}" || {
@@ -65,7 +65,7 @@ else
     exit 1
 fi
 
-# 检查下载的文件
+# Check the downloaded file
 if [ ! -f "${BLENDER_ARCHIVE}" ]; then
     echo "❌ Download failed: ${BLENDER_ARCHIVE} not found"
     exit 1
@@ -79,10 +79,10 @@ tar -xf "${BLENDER_ARCHIVE}" || {
     exit 1
 }
 
-# 清理下载的压缩包
+# Clean up the downloaded archive
 rm -f "${BLENDER_ARCHIVE}"
 
-# 检查解压结果
+# Check extraction results
 echo "Checking extracted files..."
 ls -la "${INSTALL_DIR}/"
 
@@ -93,21 +93,21 @@ if [ ! -f "${BLENDER_BIN}" ]; then
     exit 1
 fi
 
-# 确保二进制文件有执行权限
+# Ensure the binary has execute permission
 chmod +x "${BLENDER_BIN}"
 
-# 设置环境变量
+# Set environment variables
 export BLENDER_EXECUTABLE="${BLENDER_BIN}"
 export PATH="${BLENDER_DIR}:${PATH}"
 
 echo "✓ Blender installed successfully!"
 echo "BLENDER_EXECUTABLE=${BLENDER_EXECUTABLE}"
 
-# 验证 Blender（使用 --background 避免 GUI 依赖）
+# Verify Blender (using --background to avoid GUI dependency)
 if [ -x "${BLENDER_EXECUTABLE}" ]; then
     echo "Testing Blender (background mode)..."
-    # 注意：需要 LD_LIBRARY_PATH 包含必要的库
-    # 这个脚本假设调用者已经设置了正确的环境变量
+    # Note: LD_LIBRARY_PATH must include the necessary libraries
+    # This script assumes the caller has already set the correct environment variables
     if "${BLENDER_EXECUTABLE}" --background --version >/dev/null 2>&1; then
         echo "✓ Blender is ready and working!"
         "${BLENDER_EXECUTABLE}" --background --version 2>&1 | head -n 3

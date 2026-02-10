@@ -42,7 +42,7 @@ except Exception:
 # ---------------- Texture helpers (mirror intent of viz.py fix_textures) ----------------
 def _bpy_force_texture(material, tex_path, reuse_loaded=True):  # type: ignore
     """Ensure material uses texture at tex_path as Base Color (override if forced).
-    Similar目标: 将贴图作为基色, metallic=0, roughness=1, 双面。
+    Goal: apply texture as base color, metallic=0, roughness=1, double-sided.
     """
     import bpy  # type: ignore
     from pathlib import Path as _P
@@ -54,7 +54,7 @@ def _bpy_force_texture(material, tex_path, reuse_loaded=True):  # type: ignore
         material.use_nodes = True
         _debug_print(f'[bpy] Enabled nodes for material {material.name}')
     nt = material.node_tree
-    # 删除已有节点若需要强制
+    # Remove existing nodes if force mode is enabled
     force = os.environ.get('BPY_FORCE_REAPPLY_TEXTURE','0')=='1'
     if force:
         removed = 0
@@ -64,14 +64,14 @@ def _bpy_force_texture(material, tex_path, reuse_loaded=True):  # type: ignore
                 removed += 1
         if removed > 0:
             _debug_print(f'[bpy] Removed {removed} existing texture nodes (force mode)')
-    # 若已有贴图且不强制, 跳过
+    # If texture already exists and not forced, skip
     existing_tex = [n for n in nt.nodes if n.type=='TEX_IMAGE']
     if not force and existing_tex:
         _debug_print(f'[bpy] Material {material.name} already has {len(existing_tex)} texture nodes, skipping')
         return True
     img_node = nt.nodes.new('ShaderNodeTexImage')
     try:
-        # 重复加载相同图像时可复用已有 datablock
+        # Reuse existing datablock when loading the same image repeatedly
         existing = next((im for im in bpy.data.images if im.filepath == str(tex_path)), None) if reuse_loaded else None
         if existing:
             _debug_print(f'[bpy] Reusing existing image datablock: {existing.name}')
@@ -88,17 +88,17 @@ def _bpy_force_texture(material, tex_path, reuse_loaded=True):  # type: ignore
     if not bsdf:
         _debug_print(f'[bpy] Creating new Principled BSDF for {material.name}')
         bsdf = nt.nodes.new('ShaderNodeBsdfPrincipled')
-        # 连接到输出
+        # Connect to output
         out = next((n for n in nt.nodes if n.type == 'OUTPUT_MATERIAL'), None)
         if out:
             nt.links.new(bsdf.outputs['BSDF'], out.inputs['Surface'])
             _debug_print(f'[bpy] Connected BSDF to material output')
     else:
         _debug_print(f'[bpy] Using existing Principled BSDF')
-    # 链接颜色
+    # Link color
     nt.links.new(img_node.outputs['Color'], bsdf.inputs['Base Color'])
     _debug_print(f'[bpy] Connected texture to Base Color')
-    # 调整金属/粗糙度
+    # Adjust metallic/roughness
     try:
         bsdf.inputs['Metallic'].default_value = 0.0
         bsdf.inputs['Roughness'].default_value = 1.0
@@ -106,7 +106,7 @@ def _bpy_force_texture(material, tex_path, reuse_loaded=True):  # type: ignore
     except Exception:
         _debug_print(f'[bpy] Failed to set metallic/roughness values')
         pass
-    # 双面: 关闭背面剔除
+    # Double-sided: disable backface culling
     material.use_backface_culling = False
     _debug_print(f'[bpy] Material {material.name}: texture application complete')
     return True
@@ -168,7 +168,7 @@ def _bpy_create_floor(scene_data):
         obj = bpy.data.objects.new('Floor', mesh)
         bpy.context.collection.objects.link(obj)
     else:
-        # 如果没有bounds信息，不创建地板
+        # If no bounds info available, skip floor creation
         _debug_print('[bpy] No floor bounds available, skipping floor creation')
         return
         
@@ -301,22 +301,22 @@ def _bpy_import_real_asset(obj_data, index, assets_base_env_var='PTH_3DFUTURE_AS
             # Newly imported objects are selected; collect them
             imported_objects = [o for o in bpy.context.selected_objects]
             
-            # ==== Objaverse 坐标系校正 ====
+            # ==== Objaverse coordinate system correction ====
             if asset_source == 'objaverse' and imported_objects:
                 _debug_print(f'[bpy] Asset {asset_id}: applying Objaverse GLB orientation correction (reset to zero only)')
                 
-                # 选中所有导入的对象
+                # Select all imported objects
                 bpy.ops.object.select_all(action='DESELECT')
                 for o in imported_objects:
                     o.select_set(True)
                 if imported_objects:
                     bpy.context.view_layer.objects.active = imported_objects[0]
                 
-                # 重置旋转到零
+                # Reset rotation to zero
                 for o in imported_objects:
                     o.rotation_euler = (0, 0, 0)
                 
-                # 应用变换
+                # Apply transforms
                 bpy.ops.object.transform_apply(location=False, rotation=True, scale=False)
                 
                 _debug_print(f'[bpy] Asset {asset_id}: orientation correction applied')
@@ -324,7 +324,7 @@ def _bpy_import_real_asset(obj_data, index, assets_base_env_var='PTH_3DFUTURE_AS
             _debug_print(f'[bpy] Failed to import {mesh_path}: {e}')
     
     if not imported_objects:
-        # 如果无法导入真实资产，不创建任何占位符
+        # If real asset import failed, do not create any placeholder
         _debug_print(f'[bpy] Skipping object {index} - failed to import real asset {asset_id} (source: {asset_source})')
         return None
     
@@ -504,7 +504,7 @@ def _bpy_import_real_asset(obj_data, index, assets_base_env_var='PTH_3DFUTURE_AS
     tint_needed = [o for o in imported_objects if not o.data or not getattr(o.data, 'materials', [])]
     # If textures are missing but there is a texture.png file, try to apply it.
     if asset_dir:
-        # 纹理候选列表 (可通过环境变量 BPY_TEXTURE_CANDIDATES 自定义, 逗号分隔)
+        # Texture candidate list (customizable via BPY_TEXTURE_CANDIDATES env var, comma-separated)
         candidates_env = os.environ.get('BPY_TEXTURE_CANDIDATES')
         if candidates_env:
             names = [c.strip() for c in candidates_env.split(',') if c.strip()]
@@ -545,7 +545,7 @@ def _bpy_import_real_asset(obj_data, index, assets_base_env_var='PTH_3DFUTURE_AS
                     continue
                 mats = getattr(o.data, 'materials', None)
                 if not mats or len(mats)==0:
-                    # 创建一个材质
+                    # Create a material
                     mat = bpy.data.materials.new(f'T_{index}_{oi}')
                     success = _bpy_force_texture(mat, tex_path)
                     o.data.materials.append(mat)
@@ -555,7 +555,7 @@ def _bpy_import_real_asset(obj_data, index, assets_base_env_var='PTH_3DFUTURE_AS
                     else:
                         _debug_print(f'[bpy] Failed to apply texture to object {oi} (new material)')
                 else:
-                    # 为所有材质尝试应用纹理（强制/或如果未有图像节点）
+                    # Try to apply texture to all materials (force, or if no image nodes exist)
                     for mi, m in enumerate(mats):
                         success = _bpy_force_texture(m, tex_path)
                         if success:
@@ -894,8 +894,8 @@ def add_objs(sd):
                 print(f'[bpy] Asset {asset_id}: No furniture meshes found after filtering')
                 continue
             
-            # ==== Objaverse 坐标系校正 ====
-            # Objaverse 模型：重置旋转到零（测试无额外旋转）
+            # ==== Objaverse coordinate system correction ====
+            # Objaverse models: reset rotation to zero (no extra rotation applied)
             import math
             if asset_source == 'objaverse':
                 print(f'[bpy] Asset {asset_id}: applying Objaverse orientation correction (reset to zero only)')

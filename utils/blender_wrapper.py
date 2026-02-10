@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Blender渲染包装器，兼容没有bpy的环境
+Blender rendering wrapper, compatible with environments without bpy
 """
 import os
 import json
@@ -8,17 +8,17 @@ from pathlib import Path
 
 def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enable_visualization=None, fast_mode=None):
     """
-    使用外部Blender进程渲染场景
-    当bpy不可用时的备选方案
+    Render scene using an external Blender process.
+    Fallback option when bpy is not available.
     
-    参数:
-        scene_data: 场景数据字典
-        output_dir: 输出目录
-        scene_id: 场景ID
-        enable_visualization: 是否启用3D辅助线可视化（bbox、箭头、坐标网格等）
-                            如果为None，则从环境变量BPY_ENABLE_VISUALIZATION读取
-        fast_mode: 是否启用快速渲染模式（512x512, 16采样）
-                   如果为None，则从环境变量BPY_FAST_MODE读取
+    Args:
+        scene_data: Scene data dictionary
+        output_dir: Output directory
+        scene_id: Scene ID
+        enable_visualization: Whether to enable 3D helper visualization (bbox, arrows, coordinate grid, etc.)
+                            If None, reads from BPY_ENABLE_VISUALIZATION environment variable
+        fast_mode: Whether to enable fast rendering mode (512x512, 16 samples)
+                   If None, reads from BPY_FAST_MODE environment variable
     """
     try:
         import subprocess
@@ -31,13 +31,13 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # 创建临时场景文件
+        # Create temporary scene file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as temp_file:
             json.dump(scene_data, temp_file, ensure_ascii=False, indent=2)
             temp_scene_path = temp_file.name
         
         try:
-            # 构建Blender命令
+            # Build Blender command
             utils_dir = Path(__file__).parent
             main_bpy_path = utils_dir / 'main_bpy.py'
             
@@ -69,7 +69,7 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                     if detected:
                         blender_cmd = detected
                     else:
-                        # 常见路径候选（包括用户安装路径）
+                        # Common path candidates (including user installation paths)
                         candidates = [
                             os.path.expanduser('~/.local/bin/blender'),
                             os.path.expanduser('~/.local/blender/blender-4.0.2/blender'),
@@ -86,7 +86,7 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                             blender_cmd = found
                             print(f"Found Blender at: {blender_cmd}")
                         else:
-                            # 尝试自动安装
+                            # Attempt auto-installation
                             print("⚠ Blender not found! Attempting auto-installation...")
                             install_script = Path(__file__).parent.parent / 'quick_install_blender.sh'
                             if install_script.exists():
@@ -95,13 +95,13 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                                     result = subprocess.run(['bash', str(install_script)], 
                                                           capture_output=True, text=True, timeout=300)
                                     if result.returncode == 0:
-                                        # 再次尝试查找
+                                        # Try to find again
                                         detected = which('blender')
                                         if detected:
                                             blender_cmd = detected
                                             print(f"✓ Auto-installed Blender at: {blender_cmd}")
                                         else:
-                                            blender_cmd = 'blender'  # 最后回退
+                                            blender_cmd = 'blender'  # Last resort fallback
                                     else:
                                         print(f"Auto-installation failed: {result.stderr}")
                                         blender_cmd = 'blender'
@@ -123,33 +123,33 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                 '--', '--scene', temp_scene_path, '--out', str(output_path)
             ]
             
-            # 设置环境变量
+            # Set environment variables
             env = os.environ.copy()
-            # 启用详细输出来调试
+            # Enable verbose output for debugging
             env['BPY_VERBOSE'] = '1'
-            # 不使用占位符，渲染真实的3D模型和纹理
+            # Don't use placeholders, render real 3D models and textures
             env['BPY_USE_PLACEHOLDER_ONLY'] = '0'
             
-            # 启用快速渲染模式（512x512, 8采样）
+            # Enable fast rendering mode (512x512, 8 samples)
             if fast_mode is None:
-                # 从环境变量读取
-                fast_mode = os.environ.get('BPY_FAST_MODE', '1') == '1'  # 默认启用快速模式
+                # Read from environment variable
+                fast_mode = os.environ.get('BPY_FAST_MODE', '1') == '1'  # Fast mode enabled by default
             if fast_mode:
                 env['BPY_FAST_MODE'] = '1'
                 print("✓ Fast rendering mode enabled (512x512, 8 samples)")
             else:
                 env['BPY_FAST_MODE'] = '0'
             
-            # 启用3D可视化（bbox、箭头、坐标网格等）
+            # Enable 3D visualization (bbox, arrows, coordinate grid, etc.)
             if enable_visualization is None:
-                # 从环境变量读取
+                # Read from environment variable
                 enable_visualization = os.environ.get('BPY_ENABLE_VISUALIZATION', '0') == '1'
             if enable_visualization:
                 env['BPY_ENABLE_VISUALIZATION'] = '1'
                 print("✓ 3D visualization enabled (bbox, arrows, coordinate grid with labels)")
             else:
                 env['BPY_ENABLE_VISUALIZATION'] = '0'
-            # 设置3D资产路径（如果可用）- 优先使用 PathConfig
+            # Set 3D asset path (if available) - prefer PathConfig
             if not env.get('PTH_3DFUTURE_ASSETS'):
                 # Try PathConfig first
                 try:
@@ -175,11 +175,11 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                             print(f"Using asset path: {asset_path}")
                             break
                 
-                # 验证资产路径包含GLB文件
+                # Verify asset path contains GLB files
                 if env.get('PTH_3DFUTURE_ASSETS'):
                     test_glb_count = 0
                     try:
-                        for item in os.listdir(env['PTH_3DFUTURE_ASSETS'])[:10]:  # 只检查前10个
+                        for item in os.listdir(env['PTH_3DFUTURE_ASSETS'])[:10]:  # Only check first 10
                             glb_path = os.path.join(env['PTH_3DFUTURE_ASSETS'], item, 'raw_model.glb')
                             if os.path.exists(glb_path):
                                 test_glb_count += 1
@@ -187,7 +187,7 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                     except:
                         pass
             
-            # 设置 Objaverse GLB 缓存路径（如果可用）- 优先使用 PathConfig
+            # Set Objaverse GLB cache path (if available) - prefer PathConfig
             if not env.get('OBJAVERSE_GLB_CACHE_DIR'):
                 # Try PathConfig first
                 try:
@@ -216,11 +216,11 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                             print(f"Using Objaverse GLB cache: {objaverse_path}")
                             break
             
-            # 确保 Blender 子进程的 PYTHONPATH 包含项目根和 utils 目录，以便 main_bpy.py 能找到 blender_renderer
+            # Ensure Blender subprocess PYTHONPATH includes project root and utils dir so main_bpy.py can find blender_renderer
             existing_py = env.get('PYTHONPATH', '')
             utils_dir = os.path.dirname(os.path.abspath(__file__))  # /path/to/SceneReVis/utils
             extra_paths = [
-                utils_dir,  # utils 目录包含 blender_renderer.py
+                utils_dir,  # utils directory containing blender_renderer.py
                 '/path/to/workspace/respace/src',
                 '/path/to/workspace/respace',
                 '/path/to/SceneReVis'
@@ -232,7 +232,7 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
             # Use errors='replace' to avoid UnicodeDecodeError if Blender outputs non-UTF8 bytes
             result = subprocess.run(cmd, capture_output=True, text=True, errors='replace', env=env, timeout=180)
             
-            # 显示Blender的详细输出（用于调试）
+            # Show Blender verbose output (for debugging)
             if result.stdout:
                 print("=== Blender STDOUT ===")
                 print(result.stdout)
@@ -243,7 +243,7 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                 print("=== End STDERR ===")
             
             if result.returncode == 0:
-                # 检查输出文件
+                # Check output files
                 top_file = output_path / "top" / "frame.png"
                 diag_file = output_path / "diag" / "frame.png"
                 
@@ -258,9 +258,9 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
                 return create_placeholder_images(output_path, scene_id)
                 
         finally:
-            # 调试：暂时保留临时文件
+            # Debug: temporarily keep temp file
             print(f"DEBUG: Temporary scene file saved at: {temp_scene_path}")
-            # 清理临时文件 (暂时禁用用于调试)
+            # Clean up temp file (temporarily disabled for debugging)
             # try:
             #     os.unlink(temp_scene_path)
             # except:
@@ -271,31 +271,31 @@ def render_scene_blender_external(scene_data, output_dir, scene_id="scene", enab
         return create_placeholder_images(output_path, scene_id)
 
 def create_placeholder_images(output_path, scene_id="scene"):
-    """创建占位符图片"""
+    """Create placeholder images"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         
-        # 创建必要的目录
+        # Create necessary directories
         (output_path / 'top').mkdir(parents=True, exist_ok=True)
         (output_path / 'diag').mkdir(parents=True, exist_ok=True)
         
         for view in ['top', 'diag']:
-            # 创建图片
+            # Create image
             img = Image.new('RGB', (1024, 1024), color='lightblue' if view == 'top' else 'lightgreen')
             draw = ImageDraw.Draw(img)
             
-            # 绘制文字
+            # Draw text
             text = f"{view.upper()} View\n{scene_id}\nPlaceholder Image"
             text_bbox = draw.textbbox((0, 0), text)
             text_width = text_bbox[2] - text_bbox[0]
             text_height = text_bbox[3] - text_bbox[1]
             
-            # 居中文字
+            # Center text
             x = (1024 - text_width) // 2
             y = (1024 - text_height) // 2
             draw.text((x, y), text, fill='black')
             
-            # 保存图片
+            # Save image
             view_path = output_path / view / 'frame.png'
             img.save(view_path)
             print(f"Created placeholder image: {view_path}")
@@ -396,7 +396,7 @@ def render_scene_with_bpy_wrapper(scene_data, output_dir, scene_id="scene"):
         return False
 
 if __name__ == "__main__":
-    # 测试函数
+    # Test function
     test_scene = {
         "room_type": "livingroom",
         "room_envelope": {

@@ -1,5 +1,5 @@
 # Run with 16 GPUs (MI200)
-# 针对 30k+ 长度优化的配置
+# Configuration optimized for 30k+ length
 export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 export IMAGE_MAX_TOKEN_NUM=1024
 

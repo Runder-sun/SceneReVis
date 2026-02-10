@@ -234,14 +234,14 @@ class SceneEditingInteraction(BaseInteraction):
         # 优先使用 PathConfig，然后使用硬编码回退
         if path_config and path_config.logs_dir:
             log_dir = Path(path_config.logs_dir) / "interaction_logs"
-        elif Path("/path/to/logs").exists():
-            log_dir = Path("/path/to/logs/interaction_logs")
+        elif Path("/mycontainer/logs").exists():
+            log_dir = Path("/mycontainer/logs/interaction_logs")
         else:
             log_dir = Path("./logs/interaction_logs")
         
         log_dir.mkdir(parents=True, exist_ok=True)
         self.log_file = log_dir / f"scene_editing_interaction_{timestamp}_pid{pid}.log"
-        # self.log_file = Path(f"/path/to/data/logs/scene_editing_interaction_{timestamp}_pid{pid}.log")
+        # self.log_file = Path(f"/home/v-yangzhao4/projects/mycontainer/logs/scene_editing_interaction_{timestamp}_pid{pid}.log")
 
         # 设置日志记录器
         self.logger = logging.getLogger(f"scene_editing_{timestamp}_{pid}")
@@ -320,18 +320,18 @@ class SceneEditingInteraction(BaseInteraction):
             self.logger.info(f"Using PathConfig models_base_path: {models_base_path}")
         elif not self.use_objaverse:
             # 只有在非 Objaverse 模式下才强制要求 3D-FUTURE 路径
-            models_base_path = "/path/to/datasets/3d-front/3D-FUTURE-model"
+            models_base_path = "/mycontainer/datasets/3d-front/3D-FUTURE-model"
             # 回退到本地路径
             if not Path(models_base_path).exists():
-                alt_path = "/path/to/datasets/3d-front/3D-FUTURE-model"
+                alt_path = "/home/v-yangzhao4/projects/datasets/3d-front/3D-FUTURE-model"
                 if Path(alt_path).exists():
                     models_base_path = alt_path
                     self.logger.info(f"Using alternative models_base_path: {models_base_path}")
         else:
             # Objaverse 模式：3D-FUTURE 路径可选，尝试查找但不强制
             for candidate in [
-                "/path/to/datasets/3d-front/3D-FUTURE-model",
-                "/path/to/datasets/3d-front/3D-FUTURE-model"
+                "/mycontainer/datasets/3d-front/3D-FUTURE-model",
+                "/home/v-yangzhao4/projects/datasets/3d-front/3D-FUTURE-model"
             ]:
                 if Path(candidate).exists():
                     models_base_path = candidate

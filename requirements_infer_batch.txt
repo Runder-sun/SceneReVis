@@ -1,102 +1,102 @@
 # ========================================================
 # requirements_infer_batch.txt
-# 用于远程服务器推理的环境依赖
-# 适用于 infer_batch.py 批量场景生成脚本
+# Environment dependencies for remote server inference
+# For the infer_batch.py batch scene generation script
 # ========================================================
 
 # ===== Core ML Framework =====
-# ms-swift: ModelScope SWIFT 框架，用于模型推理
+# ms-swift: ModelScope SWIFT framework for model inference
 ms-swift>=3.2.0
 
-# PyTorch: 深度学习框架
+# PyTorch: Deep learning framework
 torch>=2.1.0,<2.8.0
 
-# Transformers: Hugging Face 模型库
+# Transformers: Hugging Face model library
 transformers>=4.46.0,<4.60.0
 
-# vLLM: 高性能大语言模型推理引擎（用于 VllmEngine）
+# vLLM: High-performance LLM inference engine (for VllmEngine)
 vllm>=0.6.0
 
 # ===== Azure OpenAI =====
-# 用于调用 Azure OpenAI API（如 GPT-4o 生成初始场景）
+# For calling Azure OpenAI API (e.g., GPT-4o for initial scene generation)
 openai>=1.0.0
 azure-identity>=1.12.0
 
 # ===== Model Support =====
-# ModelScope: 模型下载和管理
+# ModelScope: Model download and management
 modelscope>=1.23
 
-# PEFT: 参数高效微调（LoRA 等）
+# PEFT: Parameter-efficient fine-tuning (LoRA, etc.)
 peft>0.11,<0.18
 
-# Qwen VL Utils: Qwen2.5-VL 模型工具
+# Qwen VL Utils: Qwen2.5-VL model utilities
 qwen_vl_utils==0.0.11
 
 # ===== Physics & 3D Processing =====
-# Trimesh: 3D 网格处理（用于物理验证和碰撞检测）
+# Trimesh: 3D mesh processing (for physics validation and collision detection)
 trimesh>=4.0.0
 
-# NumPy: 数值计算（注意版本限制避免兼容性问题）
+# NumPy: Numerical computing (version capped to avoid compatibility issues)
 numpy<2.0.0
 
-# SciPy: 科学计算（用于旋转变换等）
+# SciPy: Scientific computing (for rotation transforms, etc.)
 scipy>=1.10.0
 
-# Shapely: 几何计算（用于多边形碰撞检测）
+# Shapely: Geometry computation (for polygon collision detection)
 shapely>=2.0.0
 
 # ===== Image Processing =====
-# Pillow: 图像处理
+# Pillow: Image processing
 Pillow>=9.0.0
 
 # ===== Distributed Training & Inference =====
-# DeepSpeed: 分布式训练加速
+# DeepSpeed: Distributed training acceleration
 deepspeed>=0.16.0
 
-# Accelerate: Hugging Face 分布式训练工具
+# Accelerate: Hugging Face distributed training toolkit
 accelerate>=0.30.0
 
-# Flash Attention: 高效注意力机制（需要 CUDA）
-# 注意：flash-attn 需要从源码编译或使用预编译 wheel
+# Flash Attention: Efficient attention mechanism (requires CUDA)
+# Note: flash-attn needs to be compiled from source or use a pre-built wheel
 flash-attn>=2.7.0
 
 # ===== Logging & Monitoring =====
-# SwanLab: 实验跟踪
+# SwanLab: Experiment tracking
 swanlab
 
-# Weights & Biases: 实验跟踪和可视化
+# Weights & Biases: Experiment tracking and visualization
 wandb
 
 # ===== Utilities =====
-# msgspec: 高性能消息序列化
+# msgspec: High-performance message serialization
 msgspec
 
-# Requests: HTTP 请求库
+# Requests: HTTP request library
 requests
 
-# PyBind11: C++ 绑定（部分依赖需要）
+# PyBind11: C++ bindings (required by some dependencies)
 pybind11
 
 # ===== Optional: CLIP for Asset Retrieval =====
-# 如果使用 3D-FUTURE 资产检索，需要 CLIP
+# If using 3D-FUTURE asset retrieval, CLIP is required
 # open-clip-torch>=2.0.0
 # ftfy
 
 # ===== Optional: Objaverse Asset Retrieval =====
-# 如果使用 Objaverse 资产检索
+# If using Objaverse asset retrieval
 # objaverse>=0.1.7
 
 # ========================================================
-# 安装说明
+# Installation Instructions
 # ========================================================
 #
-# 1. 基础安装：
+# 1. Basic installation:
 #    pip install -r requirements_infer_batch.txt
 #
-# 2. Flash Attention 安装（需要 CUDA）：
+# 2. Flash Attention installation (requires CUDA):
 #    pip install flash-attn --no-build-isolation
 #
-# 3. Blender 安装（用于场景渲染）：
+# 3. Blender installation (for scene rendering):
 #    bash quick_install_blender.sh
 #
 # 4. 验证安装：

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-VLM Scene Evaluation - 使用 GPT-4o Vision 进行场景多维度评估
-评估维度：合理性(rationality)、空间layout(spatial_layout)、可达性(accessibility)
-评分范围：0-100 百分制 (Implementation uses 1-10 scale internally)
+VLM Scene Evaluation - Multi-dimensional scene evaluation using GPT-4o Vision
+Evaluation dimensions: rationality, spatial_layout, accessibility
+Scoring range: 0-100 percentage (Implementation uses 1-10 scale internally)
 """
 
 import os
@@ -19,14 +19,14 @@ from concurrent.futures import ThreadPoolExecutor
 import re
 from PIL import Image
 
-# 目标分辨率
+# Target resolution
 TARGET_RESOLUTION = (1080, 570)
 
 # Azure OpenAI imports
 from openai import AzureOpenAI
 from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential, get_bearer_token_provider
 
-# Azure OpenAI配置 (与 infer.py 保持一致)
+# Azure OpenAI configuration (consistent with infer.py)
 AZURE_OPENAI_ENDPOINT = "YOUR_AZURE_OPENAI_ENDPOINT"
 AZURE_OPENAI_DEPLOYMENT_NAME = "YOUR_DEPLOYMENT_NAME"
 AZURE_OPENAI_API_VERSION = "2025-03-01-preview"
@@ -52,18 +52,18 @@ def setup_azure_client() -> AzureOpenAI:
 
 
 def image_to_base64(image_path: str, target_resolution: tuple = TARGET_RESOLUTION) -> str:
-    """将图像文件转换为base64编码的data URL，并统一分辨率"""
-    # 打开图片并调整分辨率
+    """Convert an image file to a base64-encoded data URL with unified resolution"""
+    # Open image and resize to target resolution
     with Image.open(image_path) as img:
-        # 转换为RGB模式（如果是RGBA）
+        # Convert to RGB mode (if RGBA)
         if img.mode == 'RGBA':
             img = img.convert('RGB')
         
-        # 调整分辨率
+        # Resize to target resolution
         if img.size != target_resolution:
             img = img.resize(target_resolution, Image.Resampling.LANCZOS)
         
-        # 保存到内存buffer
+        # Save to memory buffer
         buffer = io.BytesIO()
         img.save(buffer, format='PNG')
         img_data = base64.b64encode(buffer.getvalue()).decode("utf-8")
@@ -80,18 +80,18 @@ def call_gpt4o_vision(
     max_retries: int = 3
 ) -> Optional[str]:
     """
-    调用 GPT-4o Vision API
+    Call GPT-4o Vision API.
     
     Args:
-        client: AzureOpenAI 客户端
-        image_path: 图像文件路径
-        prompt: 提示文本
-        max_tokens: 最大生成token数
-        temperature: 温度参数
-        max_retries: 最大重试次数
+        client: AzureOpenAI client
+        image_path: Image file path
+        prompt: Prompt text
+        max_tokens: Maximum generation tokens
+        temperature: Temperature parameter
+        max_retries: Maximum retry count
         
     Returns:
-        模型响应文本，或 None（如果失败）
+        Model response text, or None (if failed)
     """
     if not Path(image_path).exists():
         print(f"Warning: Image file not found: {image_path}")
@@ -132,24 +132,24 @@ def call_gpt4o_vision(
             print(f"API call attempt {attempt + 1}/{max_retries} failed: {e}")
             if attempt < max_retries - 1:
                 import time
-                time.sleep(2 ** attempt)  # 指数退避
+                time.sleep(2 ** attempt)  # Exponential backoff
     
     return None
 
 
 def parse_score_from_response(response: str) -> Optional[int]:
     """
-    从模型响应中解析 1-10 的分数
+    Parse a 1-10 score from the model response.
     
     Args:
-        response: 模型响应文本
+        response: Model response text
         
     Returns:
-        1-10 的整数分数，或 None（如果解析失败）
+        Integer score from 1-10, or None (if parsing failed)
     """
     if response is None:
         return None
-    # 匹配 1-10 分
+    # Match 1-10 score
     patterns = [
         r'\b([1-9]|10)\s*/\s*10\b',  # "8/10"
         r'\bscore[:\s]*([1-9]|10)\b',
@@ -172,15 +172,15 @@ def generate_scene_description(
     user_requirement: str
 ) -> Optional[str]:
     """
-    第一阶段：让 GPT-4o 详细描述场景
+    Phase 1: Have GPT-4o describe the scene in detail.
     
     Args:
-        client: AzureOpenAI 客户端
-        image_path: 渲染图路径
-        user_requirement: 用户需求
+        client: AzureOpenAI client
+        image_path: Render image path
+        user_requirement: User requirement
         
     Returns:
-        详细场景描述文本，或 None（如果失败）
+        Detailed scene description text, or None (if failed)
     """
     prompt_describe = f"""You are a highly critical interior design expert. Carefully examine this final scene rendering (left: top view, right: diagonal view).
 
@@ -259,10 +259,10 @@ def evaluate_rationality(
     scene_metadata: Optional[Dict[str, Any]] = None
 ) -> Optional[int]:
     """
-    评估场景合理性（1-10分）
-    只评估：碰撞、出界、悬空、房间大小、物体数量
+    Evaluate scene rationality (score 1-10).
+    Only evaluates: collisions, out-of-bounds, floating objects, room size, object count.
     """
-    # 构建元数据信息
+    # Build metadata info
     metadata_info = ""
     room_size_warning = ""
     object_count_warning = ""
@@ -288,7 +288,7 @@ def evaluate_rationality(
             else:
                 room_size_warning = f"\n**⚠️ ROOM SIZE WARNING: Room is TOO LARGE ({room_area:.1f} m² > {max_area} m²). MAX SCORE: 6**"
         
-        # 检查物体数量是否过少
+        # Check if object count is too low
         if object_count < 4:
             object_count_warning = f"\n**⚠️ OBJECT COUNT WARNING: Scene is TOO SIMPLE (only {object_count} objects, minimum 4 required). MAX SCORE: 6**"
     
@@ -338,9 +338,9 @@ def evaluate_spatial_layout(
     scene_metadata: Optional[Dict[str, Any]] = None
 ) -> Optional[int]:
     """
-    评估空间layout（1-10分）
+    Evaluate spatial layout (score 1-10).
     """
-    # 构建元数据信息
+    # Build metadata info
     metadata_info = ""
     if scene_metadata:
         metadata_info = f"""
@@ -415,9 +415,9 @@ def evaluate_accessibility(
     scene_metadata: Optional[Dict[str, Any]] = None
 ) -> Optional[int]:
     """
-    评估场景可达性（1-10分）
+    Evaluate scene accessibility (score 1-10).
     """
-    # 构建元数据信息
+    # Build metadata info
     metadata_info = ""
     if scene_metadata:
         metadata_info = f"""
@@ -478,38 +478,38 @@ User requirement: {user_requirement}
 
 def clean_user_requirement(text: str) -> str:
     """
-    清理用户需求文本，移除 <current_scene>...</current_scene> 标签
+    Clean user requirement text by removing <current_scene>...</current_scene> tags.
     
     Args:
-        text: 原始文本
+        text: Original text
         
     Returns:
-        清理后的文本
+        Cleaned text
     """
     import re
-    # 移除 <current_scene>...</current_scene> 标签及其内容
+    # Remove <current_scene>...</current_scene> tags and their content
     cleaned = re.sub(r'<current_scene>.*?</current_scene>', '', text, flags=re.DOTALL)
-    # 移除多余的空白
+    # Remove extra whitespace
     cleaned = re.sub(r'\s+', ' ', cleaned).strip()
     return cleaned
 
 
 def normalize_room_type(room_type_raw: str) -> str:
     """
-    标准化房间类型名称
+    Normalize room type name.
     
     Args:
-        room_type_raw: 原始房间类型字符串
+        room_type_raw: Raw room type string
         
     Returns:
-        标准化的房间类型 (bedroom, livingroom, diningroom, studyroom, etc.)
+        Normalized room type (bedroom, livingroom, diningroom, studyroom, etc.)
     """
     if not room_type_raw:
         return "unknown"
     
     room_type_lower = room_type_raw.lower()
     
-    # 检查是否包含关键词
+    # Check if it contains keywords
     if "bedroom" in room_type_lower or "bed" in room_type_lower:
         return "bedroom"
     elif "living" in room_type_lower:
@@ -523,7 +523,7 @@ def normalize_room_type(room_type_raw: str) -> str:
     elif "bathroom" in room_type_lower:
         return "bathroom"
     
-    # 如果是简单的房间类型名称
+    # If it's a simple room type name
     simple_types = ["bedroom", "livingroom", "diningroom", "studyroom", "kitchen", "bathroom"]
     for t in simple_types:
         if t in room_type_lower.replace(" ", "").replace("_", ""):
@@ -534,13 +534,13 @@ def normalize_room_type(room_type_raw: str) -> str:
 
 def get_room_size_range(room_type: str) -> Tuple[float, float]:
     """
-    获取房间类型的合理面积范围
+    Get the reasonable area range for a room type.
     
     Args:
-        room_type: 标准化的房间类型
+        room_type: Normalized room type
         
     Returns:
-        (min_area, max_area) 元组，单位为平方米
+        (min_area, max_area) tuple, in square meters
     """
     room_size_ranges = {
         "bedroom": (10, 25),
@@ -550,13 +550,13 @@ def get_room_size_range(room_type: str) -> Tuple[float, float]:
         "kitchen": (6, 20),
         "bathroom": (4, 15),
     }
-    return room_size_ranges.get(room_type, (10, 40))  # 默认范围
+    return room_size_ranges.get(room_type, (10, 40))  # Default range
 
 
 def parse_scene_json(json_path: str) -> Optional[Dict[str, Any]]:
     """
-    解析场景JSON文件，提取房间元数据
-    支持多种JSON命名格式：
+    Parse a scene JSON file and extract room metadata.
+    Supports multiple JSON naming formats:
     - bedroom_prompt_000.json (DiffuScene)
     - prompt_2.json (Holodeck)
     - 0001.json (IDesign)
@@ -565,53 +565,53 @@ def parse_scene_json(json_path: str) -> Optional[Dict[str, Any]]:
     - prompt_3_final_scene.json (Ours)
     
     Args:
-        json_path: JSON文件路径
+        json_path: JSON file path
         
     Returns:
-        包含房间元数据的字典，或 None（如果解析失败）
+        Dictionary containing room metadata, or None (if parsing failed)
     """
     try:
         with open(json_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
         
-        # 计算房间尺寸
+        # Calculate room dimensions
         bounds_bottom = data.get('bounds_bottom', [])
         room_width = 0.0
         room_depth = 0.0
         room_area = 0.0
         
         if len(bounds_bottom) >= 4:
-            # 从 bounds_bottom 计算房间尺寸
-            # bounds_bottom 是四个角点的坐标 [x, y, z]
+            # Calculate room dimensions from bounds_bottom
+            # bounds_bottom contains four corner coordinates [x, y, z]
             xs = [p[0] for p in bounds_bottom]
             zs = [p[2] for p in bounds_bottom]
             room_width = max(xs) - min(xs)
             room_depth = max(zs) - min(zs)
             room_area = room_width * room_depth
         
-        # 获取原始房间类型并标准化
+        # Get raw room type and normalize
         room_type_raw = data.get('room_type', 'unknown')
-        # 如果 room_type 是长文本（如 Holodeck 的 prompt），尝试从文件名或 room_id 提取
-        if len(room_type_raw) > 50:  # 太长说明是 prompt 不是房间类型
+        # If room_type is long text (e.g., Holodeck's prompt), try to extract from filename or room_id
+        if len(room_type_raw) > 50:  # Too long means it's a prompt, not a room type
             room_id = data.get('room_id', '')
-            # 从 JSON 文件路径提取
+            # Extract from JSON file path
             json_filename = Path(json_path).stem.lower()
             parent_folder = Path(json_path).parent.name.lower()
             
-            # 优先从父文件夹名提取
+            # Prioritize extraction from parent folder name
             room_type_normalized = normalize_room_type(parent_folder)
-            if room_type_normalized == parent_folder:  # 未匹配到
+            if room_type_normalized == parent_folder:  # no match found
                 room_type_normalized = normalize_room_type(room_id)
-            if room_type_normalized == room_id:  # 仍未匹配
+            if room_type_normalized == room_id:  # still no match
                 room_type_normalized = normalize_room_type(json_filename)
         else:
             room_type_normalized = normalize_room_type(room_type_raw)
         
-        # 获取物体列表
+        # Get object list
         objects = data.get('objects', [])
         object_count = len(objects)
         
-        # 统计物体类型
+        # Count object types
         object_types = {}
         object_list = []
         for obj in objects:
@@ -619,11 +619,11 @@ def parse_scene_json(json_path: str) -> Optional[Dict[str, Any]]:
             object_list.append(desc)
             object_types[desc] = object_types.get(desc, 0) + 1
         
-        # 获取房间大小合理范围
+        # Get reasonable room size range
         min_area, max_area = get_room_size_range(room_type_normalized)
         room_size_valid = min_area <= room_area <= max_area
         
-        # 构建元数据
+        # Build metadata
         metadata = {
             "room_type": room_type_normalized,
             "room_type_raw": room_type_raw,
@@ -648,13 +648,13 @@ def parse_scene_json(json_path: str) -> Optional[Dict[str, Any]]:
 
 def format_scene_metadata(metadata: Dict[str, Any]) -> str:
     """
-    格式化场景元数据为可读字符串
+    Format scene metadata into a readable string.
     
     Args:
-        metadata: 场景元数据字典
+        metadata: Scene metadata dictionary
         
     Returns:
-        格式化的字符串
+        Formatted string
     """
     if metadata is None:
         return ""
@@ -677,22 +677,22 @@ def evaluate_single_scene(
     verbose: bool = False
 ) -> Dict[str, Any]:
     """
-    评估单个场景
+    Evaluate a single scene.
     
     Args:
-        client: AzureOpenAI 客户端
-        render_image_path: 渲染图像路径
-        user_requirement: 用户需求文本
-        scene_metadata: 场景元数据（从JSON解析）
-        verbose: 是否输出详细信息
+        client: AzureOpenAI client
+        render_image_path: Render image path
+        user_requirement: User requirement text
+        scene_metadata: Scene metadata (parsed from JSON)
+        verbose: Whether to output detailed information
         
     Returns:
-        包含评分结果的字典
+        Dictionary containing scoring results
     """
-    # 清理用户需求文本
+    # Clean user requirement text
     user_requirement = clean_user_requirement(user_requirement)
     
-    # 格式化元数据
+    # Format metadata
     metadata_str = format_scene_metadata(scene_metadata) if scene_metadata else ""
     
     result = {
@@ -711,7 +711,7 @@ def evaluate_single_scene(
     }
     
     try:
-        # 检查渲染图是否存在
+        # Check if render image exists
         if not Path(render_image_path).exists():
             result["error"] = f"Render image not found: {render_image_path}"
             return result
@@ -737,7 +737,7 @@ def evaluate_single_scene(
             client, render_image_path, user_requirement, scene_metadata
         )
         
-        # 计算平均分
+        # Calculate average score
         valid_scores = [s for s in result["scores"].values() if s is not None]
         if valid_scores:
             result["average_score"] = sum(valid_scores) / len(valid_scores)
@@ -751,15 +751,15 @@ def evaluate_single_scene(
 
 def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str = None) -> List[Dict[str, str]]:
     """
-    收集评估任务
+    Collect evaluation tasks.
     
     Args:
-        render_dir: 渲染图目录
-        prompts_file: prompt文件路径
-        json_dir: JSON文件目录（可选，用于解析场景元数据）
+        render_dir: Render image directory
+        prompts_file: Prompt file path
+        json_dir: JSON file directory (optional, for parsing scene metadata)
         
     Returns:
-        任务列表
+        Task list
     """
     render_path = Path(render_dir)
     prompts_path = Path(prompts_file)
@@ -773,20 +773,20 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
         print(f"Error: Prompts file not found: {prompts_file}")
         return []
     
-    # 检查JSON目录
+    # Check JSON directory
     if json_path_dir and not json_path_dir.exists():
         print(f"Warning: JSON directory not found: {json_dir}, will try to find JSON files alongside images")
         json_path_dir = None
         
-    # 读取所有prompts
+    # Read all prompts
     with open(prompts_path, 'r', encoding='utf-8') as f:
         prompts = [line.strip() for line in f if line.strip()]
     
-    # 如果有JSON目录，建立索引
+    # If JSON directory exists, build index
     json_files_map = {}
     if json_path_dir:
         for json_file in json_path_dir.glob("*.json"):
-            # 尝试从文件名提取索引
+            # Try to extract index from filename
             match = re.search(r'(?:prompt|scene)?_?(\d+)', json_file.stem)
             if match:
                 idx = int(match.group(1))
@@ -795,8 +795,8 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
     
     tasks = []
     
-    # 遍历渲染图
-    # 支持多种图片格式
+    # Iterate over render images
+    # Support multiple image formats
     image_extensions = ['*.png', '*.jpg', '*.jpeg']
     image_files = []
     for ext in image_extensions:
@@ -804,7 +804,7 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
     
     print(f"Scanning {len(image_files)} images...")
 
-    # 自动检测索引偏移 (0-based vs 1-based)
+    # Auto-detect index offset (0-based vs 1-based)
     indices = []
     for img_path in image_files:
         match = re.search(r'(?:prompt|scene)_(\d+)', img_path.name)
@@ -830,37 +830,37 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
         matched_idx = -1
         match_method = "none"
         
-        # 策略1: 文件名ID匹配 (prompt_123.png 或 scene_123.png)
+        # Strategy 1: Match by filename ID (prompt_123.png or scene_123.png)
         match = re.search(r'(?:prompt|scene)_(\d+)', img_path.name)
         if match:
             idx = int(match.group(1))
-            # 应用偏移
+            # Apply offset
             adj_idx = idx + offset
             if 0 <= adj_idx < len(prompts):
                 matched_idx = adj_idx
                 match_method = f"id_offset_{offset}" if offset != 0 else "id"
         
-        # 策略2: 同名JSON文件匹配 (读取 room_type 或 prompt 字段)
+        # Strategy 2: Match by same-name JSON file (read room_type or prompt field)
         if matched_idx == -1:
             json_path = img_path.with_suffix('.json')
             if json_path.exists():
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
-                        # 尝试获取 prompt 文本
+                        # Try to get prompt text
                         prompt_text = data.get('room_type') or data.get('prompt') or data.get('user_requirement')
                         
                         if prompt_text:
-                            # 在 prompts 列表中查找
+                            # Search in the prompts list
                             prompt_text = prompt_text.strip()
-                            # 1. 精确匹配
+                            # 1. Exact match
                             if prompt_text in prompts:
                                 matched_idx = prompts.index(prompt_text)
                                 match_method = "json_exact"
                             else:
-                                # 2. 模糊匹配 (如果 JSON 中的 prompt 是完整的话)
+                                # 2. Fuzzy match (in case the JSON prompt is complete)
                                 for i, p in enumerate(prompts):
-                                    # 检查是否包含 (双向)
+                                    # Check containment (bidirectional)
                                     if p in prompt_text or prompt_text in p:
                                         matched_idx = i
                                         match_method = "json_contain"
@@ -868,16 +868,16 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
                 except Exception as e:
                     print(f"Warning: Error reading JSON {json_path}: {e}")
 
-        # 策略3: 文件名内容匹配
+        # Strategy 3: Match by filename content
         if matched_idx == -1:
-            # 清理文件名
+            # Clean the filename
             stem = img_path.stem
-            # 移除常见的时间戳后缀 (e.g., -2025-12-23-...)
+            # Remove common timestamp suffixes (e.g., -2025-12-23-...)
             stem_clean = re.sub(r'-\d{4}-\d{2}-\d{2}.*$', '', stem)
-            # 将下划线替换为空格
+            # Replace underscores with spaces
             stem_text = stem_clean.replace('_', ' ').lower()
             
-            # 在 prompts 中查找以此开头的
+            # Search prompts that start with this text
             candidates = []
             for i, p in enumerate(prompts):
                 p_clean = p.lower()
@@ -889,30 +889,30 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
                 matched_idx = candidates[0]
                 match_method = "filename_content"
             elif len(candidates) > 1:
-                # 如果有多个匹配，取第一个
+                # If multiple matches, take the first one
                 matched_idx = candidates[0]
                 match_method = "filename_content_ambiguous"
 
         if matched_idx != -1:
-            # 尝试查找对应的JSON文件
+            # Try to find the corresponding JSON file
             json_file_path = None
             
-            # 策略1: 从文件名中提取索引，查找JSON目录中的文件
+            # Strategy 1: Extract index from filename, look up in JSON directory
             match = re.search(r'(?:prompt|scene)_(\d+)', img_path.name)
             if match and json_files_map:
                 idx = int(match.group(1))
                 if idx in json_files_map:
                     json_file_path = json_files_map[idx]
             
-            # 策略2: 查找同名JSON文件（与图片同目录或JSON目录）
+            # Strategy 2: Find same-name JSON file (in image directory or JSON directory)
             if not json_file_path:
-                # 先在JSON目录中查找
+                # First, search in the JSON directory
                 if json_path_dir:
                     potential_json = json_path_dir / f"{img_path.stem}.json"
                     if potential_json.exists():
                         json_file_path = str(potential_json)
                 
-                # 再在图片同目录查找
+                # Then, search in the same directory as the image
                 if not json_file_path:
                     potential_json = img_path.with_suffix('.json')
                     if potential_json.exists():
@@ -944,7 +944,7 @@ def process_single_task_safe(client, task, existing_result, verbose, task_id, to
         print(f"[{task_id}/{total_tasks}] Evaluating: prompt_{task['prompt_id']}")
         # print(f"  Requirement: {task['user_requirement'][:80]}...")
 
-    # 解析场景元数据
+    # Parse scene metadata
     scene_metadata = None
     if task.get("json_file"):
         scene_metadata = parse_scene_json(task["json_file"])
@@ -971,27 +971,27 @@ def run_evaluation(
     resume: bool = False
 ) -> Dict[str, Any]:
     """
-    运行批量评估
+    Run batch evaluation.
     
     Args:
-        render_dir: 渲染图目录
-        prompts_file: prompt文件路径
-        output_file: 输出文件路径
-        json_dir: JSON场景文件目录（可选）
-        max_scenes: 最大评估场景数
-        max_workers: 最大并行工作线程数
-        delay: 请求间隔（秒）
-        verbose: 是否输出详细信息
-        resume: 是否从上次中断处继续
+        render_dir: Render image directory
+        prompts_file: Prompt file path
+        output_file: Output file path
+        json_dir: JSON scene file directory (optional)
+        max_scenes: Maximum number of scenes to evaluate
+        max_workers: Maximum parallel worker threads
+        delay: Delay between requests (seconds)
+        verbose: Whether to output detailed information
+        resume: Whether to resume from last interruption
         
     Returns:
-        评估结果字典
+        Evaluation result dictionary
     """
     print("=" * 80)
     print("VLM Scene Evaluation - GPT-4o Vision")
     print("=" * 80)
     
-    # 收集评估任务
+    # Collect evaluation tasks
     print("\nCollecting evaluation tasks...")
     tasks = collect_evaluation_tasks(render_dir, prompts_file, json_dir)
     
@@ -1001,12 +1001,12 @@ def run_evaluation(
     
     print(f"Found {len(tasks)} scenes to evaluate")
     
-    # 限制场景数量
+    # Limit the number of scenes
     if max_scenes and max_scenes > 0:
         tasks = tasks[:max_scenes]
         print(f"Limiting to {max_scenes} scenes")
     
-    # 检查是否需要恢复
+    # Check if resume is needed
     existing_results = {}
     if resume and output_file and Path(output_file).exists():
         try:
@@ -1023,11 +1023,11 @@ def run_evaluation(
         except Exception as e:
             print(f"Warning: Could not load existing results: {e}")
     
-    # 初始化客户端
+    # Initialize client
     print("\nInitializing Azure OpenAI client...")
     client = setup_azure_client()
     
-    # 评估所有场景
+    # Evaluate all scenes
     print(f"\nStarting evaluation with {max_workers} workers...")
     all_results = []
     successful = 0
@@ -1073,7 +1073,7 @@ def run_evaluation(
                         failed += 1
                         print(f"  ✗ [{result['render_file']}] Failed: {result.get('error', 'Unknown error')}")
                     
-                    # 定期保存结果
+                    # Periodically save results
                     if output_file and len(all_results) % 10 == 0:
                         save_results(all_results, output_file)
                         print(f"  [Checkpoint saved]")
@@ -1081,34 +1081,34 @@ def run_evaluation(
                 with print_lock:
                     print(f"Worker exception: {e}")
     
-    # 计算统计信息
+    # Calculate statistics
     print("\n" + "=" * 80)
     print("Evaluation Complete!")
     print(f"Successful: {successful}, Failed: {failed}")
     
-    # 生成最终结果
+    # Generate final results
     final_results = generate_final_results(all_results, len(tasks))
-    # 保存结果
+    # Save results
     if output_file:
         save_results(all_results, output_file, final_results)
         print(f"\nResults saved to: {output_file}")
-    # 打印统计摘要
+    # Print statistics summary
     print_statistics(final_results)
     return final_results
 
 
 def save_results(all_results: List[Dict], output_file: str, final_results: Dict = None):
-    """保存结果到文件"""
+    """Save results to file"""
     if final_results is None:
         final_results = generate_final_results(all_results, len(all_results))
     with open(output_file, 'w', encoding='utf-8') as f:
         json.dump(final_results, f, indent=2, ensure_ascii=False)
 
 def generate_final_results(all_results: List[Dict], total_scenes: int) -> Dict[str, Any]:
-    """生成最终结果统计（恢复实现）"""
+    """Generate final result statistics (restored implementation)"""
     successful_results = [r for r in all_results if r.get("success")]
 
-    # 收集各维度分数
+    # Collect scores for each dimension
     score_names = ["rationality", "spatial_layout", "accessibility"]
     score_values = {name: [] for name in score_names}
     average_scores = []
@@ -1121,7 +1121,7 @@ def generate_final_results(all_results: List[Dict], total_scenes: int) -> Dict[s
         if result.get("average_score") is not None:
             average_scores.append(result["average_score"])
 
-    # 计算统计量
+    # Compute statistics
     import numpy as np
 
     statistics = {}
@@ -1157,7 +1157,7 @@ def generate_final_results(all_results: List[Dict], total_scenes: int) -> Dict[s
     }
 
 def print_statistics(final_results: Dict):
-    """打印统计摘要"""
+    """Print statistics summary"""
     print("\n--- Evaluation Statistics ---")
     summary = final_results.get("summary", {})
     print(f"\nTotal Scenes: {summary.get('total_scenes', 0)}")
@@ -1220,10 +1220,10 @@ def main():
         help='Resume from previous evaluation checkpoint'
     )
     args = parser.parse_args()
-    # 设置默认输出路径
+    # Set default output path
     if args.output is None:
         args.output = str(Path(args.render_dir) / "vlm_evaluation_results.json")
-    # 运行评估
+    # Run evaluation
     run_evaluation(
         render_dir=args.render_dir,
         prompts_file=args.prompts_file,
