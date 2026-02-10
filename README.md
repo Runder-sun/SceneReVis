@@ -2,7 +2,7 @@
 
 **SceneReVis: Iterative 3D Indoor Scene Generation with Vision-Language Reinforcement Learning**
 
-A closed-loop framework for generating physically plausible and aesthetically coherent 3D indoor scenes through multi-turn iterative refinement. The system combines Large Language Model (LLM) reasoning, Vision-Language Model (VLM) feedback, and physics-based validation to produce high-quality 3D room layouts.
+A closed-loop framework for generating physically plausible and aesthetically coherent 3D indoor scenes through multi-turn iterative refinement. The system combines Vision-Language Model (VLM) reasoning, physics-based validation, and structured tool calls to produce high-quality 3D room layouts.
 
 ---
 
@@ -27,27 +27,18 @@ SceneReVis operates through an iterative **Render → Evaluate → Revise** loop
 
 ```
 SceneReVis/
-├── infer.py                      # Single-GPU inference with iterative refinement
-├── infer_batch.py                # Multi-GPU batch inference
-├── infer_amlt.py                 # Cloud (AMLT) inference variant
-├── optimize_scene.py             # Scene physics optimization
-├── batch_optimize_integrated.py  # Batch scene optimization
-├── batch_optimize_rooms.py       # Room-level batch optimization
+├── infer.py                      # Inference: iterative scene generation (single & batch)
 │
 ├── eval/                         # Evaluation tools
 │   ├── myeval.py                 # Mesh-based collision & OOB evaluation
-│   ├── myeval_bbox.py            # Bounding box-based evaluation
-│   ├── myeval_mesh_notol.py      # Mesh evaluation (no tolerance)
 │   ├── voxel_eval.py             # Voxel-based spatial evaluation
-│   ├── vlm_scene_eval.py         # VLM (GPT-4o Vision) multi-dimension eval
-│   ├── calculate_collision_oob.py # Collision/OOB rate calculation
-│   ├── batch_eval_all_baselines.py # Batch baseline evaluation
-│   └── batch_vlm_eval.py         # Batch VLM evaluation
+│   └── vlm_scene_eval.py         # VLM (GPT-4o Vision) multi-dimension evaluation
 │
 ├── utils/                        # Core utilities
 │   ├── sample.py                 # 3D-FUTURE asset retrieval (SigLIP-based)
 │   ├── objaverse_retriever.py    # Objaverse asset retrieval (CLIP+SBERT)
-│   ├── objaverse_glb_manager.py  # Objaverse GLB asset management
+│   ├── objaverse_glb_manager.py  # Objaverse GLB asset download & caching
+│   ├── optimize_scene.py         # GPT-assisted scene physics optimization
 │   ├── scene_editor.py           # Scene editing operations (add/remove/move/etc.)
 │   ├── format_converter.py       # Scene format conversion (flat ↔ grouped)
 │   ├── blender_renderer.py       # Blender rendering engine
@@ -56,27 +47,19 @@ SceneReVis/
 │   ├── visualization_3d.py       # 3D visualization (bbox, arrows, grid)
 │   ├── RL_utils.py               # RL training utilities
 │   ├── path_config.py            # Unified path configuration manager
-│   └── image_merger.py           # Multi-view image composition
-│
-├── dataprocess/                  # Data processing pipeline
-│   ├── generate_final_conversations_v3.py  # CoT conversation generation
-│   ├── prepare_rl_data.py        # RL training data preparation
-│   ├── generate_intermediate_data.py       # Intermediate data generation
-│   ├── batch_process_scenes.py   # Batch scene processing
-│   ├── evaluate_and_filter_chains.py       # Chain quality filtering
-│   ├── validate_scenes_voxel.py  # Voxel-based scene validation
-│   └── ...
+│   ├── image_merger.py           # Multi-view image composition
+│   └── batch_render_all.py       # Batch rendering helper
 │
 ├── script/                       # Training scripts
 │   ├── RL/                       # Reinforcement learning
-│   │   ├── scene_reward.py       # Reward function
-│   │   ├── scene_editing_interaction.py  # RL interaction handler
+│   │   ├── scene_reward.py       # Reward function (voxel-based physics)
+│   │   ├── scene_editing_interaction.py  # Multi-turn RL interaction handler
 │   │   ├── run_grpo_B200.sh      # GRPO training launch script
 │   │   └── config/               # RL configuration files
 │   └── sft/                      # Supervised fine-tuning
 │       └── sft_B200.sh           # SFT training launch script
 │
-├── verl/                         # VERL RL framework (modified)
+├── verl/                         # VERL RL framework (modified fork)
 │   └── verl/
 │       ├── interactions/         # Multi-turn interaction interfaces
 │       │   ├── base.py           # Base interaction class
@@ -84,13 +67,22 @@ SceneReVis/
 │       ├── trainer/              # Training orchestration
 │       └── ...
 │
+├── split_prompts/                # Test prompts (550 total across 7 room types)
+│   ├── bedroom.txt               # 150 prompts
+│   ├── living_room.txt           # 150 prompts
+│   ├── dining_room.txt           # 50 prompts
+│   ├── entertainment_room.txt    # 50 prompts
+│   ├── gym.txt                   # 50 prompts
+│   ├── office.txt                # 50 prompts
+│   └── study_room.txt            # 50 prompts
+│
 ├── metadata/                     # Asset metadata
 │   ├── model_info_3dfuture_assets.json
 │   └── invalid_threed_front_rooms.txt
 │
 ├── requirements_infer_batch.txt  # Inference dependencies
-├── setup_env.sh                  # Environment setup
-└── quick_install_blender.sh      # Blender installation
+├── setup_env.sh                  # Environment variable setup
+└── quick_install_blender.sh      # Blender 4.0.2 installation
 ```
 
 ---
@@ -104,83 +96,126 @@ SceneReVis/
 conda create -n scenerevis python=3.11 -y
 conda activate scenerevis
 
-# Install dependencies
+# Install core dependencies
+pip install ms-swift vllm accelerate deepspeed
+pip install openai azure-identity
+pip install trimesh scipy shapely pillow numpy
+pip install compress_json compress_pickle open_clip_torch sentence-transformers
+pip install swanlab msgspec python-fcl
+
+# Or install from requirements file
 pip install -r requirements_infer_batch.txt
 
-# Install Blender for rendering
+# Install Blender 4.0.2 for rendering (no sudo required)
 bash quick_install_blender.sh
 
-# Install VERL framework (for RL training)
+# (Optional) Install VERL framework for RL training
 cd verl && pip install -e . && cd ..
 ```
 
 ### 2. Download Required Assets
 
-You need to download the following assets separately:
+#### 3D-FUTURE Models (Required)
+Download from [3D-FUTURE](https://tianchi.aliyun.com/specials/promotion/alibaba-3d-future) and extract to your datasets directory.
 
-- **3D-FUTURE models**: Download from [3D-FUTURE](https://tianchi.aliyun.com/specials/promotion/alibaba-3d-future) and place under your datasets directory
-- **Objaverse assets** (optional): For extended object library
-- **Metadata files**: Download embeddings pickle file (not included due to size)
+#### Objaverse GLB Assets (Optional)
+Objaverse assets are downloaded on-demand during inference via `utils/objaverse_glb_manager.py`. For evaluation, pre-download is recommended as the evaluation scripts only look at the local cache.
+
+#### Metadata Files
+The `metadata/` directory contains JSON metadata for 3D-FUTURE assets. You also need the embeddings pickle file (`model_info_3dfuture_assets_embeds.pickle`) for asset retrieval — download it separately due to its size.
 
 ### 3. Configuration
 
-Update paths in your environment or config files:
-
 ```bash
 # Set environment variables
+source setup_env.sh
+
+# Or set manually:
 export PTH_3DFUTURE_ASSETS=/path/to/3D-FUTURE-model
 export PTH_ASSETS_METADATA=./metadata/model_info_3dfuture_assets.json
 export PTH_ASSETS_EMBED=./metadata/model_info_3dfuture_assets_embeds.pickle
 
-# For Azure OpenAI (optional, for VLM feedback)
+# For Azure OpenAI (optional, for VLM feedback & initial room generation)
 export AZURE_OPENAI_ENDPOINT=your_endpoint
-export AZURE_OPENAI_API_KEY=your_key
+export AZURE_OPENAI_SCOPE=your_scope
+export AZURE_OPENAI_DEPLOYMENT_NAME=your_deployment_name
+
+# Required for multi-GPU inference
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export VLLM_USE_RAY_SPMD_WORKER=0
+export VLLM_USE_RAY_COMPILED_DAG=0
+export RAY_IGNORE_UNHANDLED_ERRORS=1
 ```
 
 ### 4. Inference
 
 ```bash
-# Single scene inference
-python infer.py --prompt "Design a cozy bedroom with a queen bed and reading corner"
-
-# Batch inference (multi-GPU)
-python infer_batch.py --batch-mode --parallel \
+# Single scene generation
+python infer.py \
+    --prompt "Design a cozy bedroom with a queen bed and reading corner" \
     --model /path/to/checkpoint \
-    --prompts-file prompts.txt \
     --iterations 10 \
-    --output ./output/results
+    --generate-room \
+    --use-model-for-creation \
+    --asset-source objaverse
+
+# Batch inference (sequential processing)
+python infer.py \
+    --batch-mode \
+    --model /path/to/checkpoint \
+    --prompts-file split_prompts/bedroom.txt \
+    --output ./output/bedroom \
+    --iterations 15 \
+    --max-history-turns 8 \
+    --asset-source objaverse \
+    --generate-room \
+    --use-model-for-creation \
+    --skip-existing
 ```
 
 ### 5. Evaluation
 
 ```bash
-# Mesh-based physical evaluation
-python eval/myeval.py --scene-dir ./output/results --models-path /path/to/3D-FUTURE-model
+# Collect final scenes from inference output
+SCENES_DIR="./output/bedroom/final_scenes_collection"
+
+# Mesh-based collision & OOB evaluation
+python eval/myeval.py \
+    --format respace \
+    --scenes_dir $SCENES_DIR \
+    --models_path /path/to/3D-FUTURE-model \
+    --output_dir ./output/bedroom/evaluation
 
 # Voxel-based evaluation
-python eval/voxel_eval.py --scene-dir ./output/results --models-path /path/to/3D-FUTURE-model
+python eval/voxel_eval.py \
+    --format respace \
+    --scenes_dir $SCENES_DIR \
+    --models_path /path/to/3D-FUTURE-model \
+    --output_file ./output/bedroom/evaluation/voxel_results.json \
+    --voxel_size 0.05
 
-# VLM evaluation (requires Azure OpenAI)
-python eval/vlm_scene_eval.py --render-dir ./output/rendered --prompts-file prompts.txt
+# VLM multi-dimension evaluation (requires Azure OpenAI)
+python eval/vlm_scene_eval.py \
+    --render-dir ./output/bedroom/rendered \
+    --prompts-file split_prompts/bedroom.txt
 ```
 
 ### 6. Training
 
 #### SFT (Supervised Fine-Tuning)
 
-```bash
-# Prepare SFT data
-python dataprocess/generate_final_conversations_v3.py
+Training data: **SceneChain-12K** — 11,444 multi-turn scene editing conversation trajectories with rendered images.
 
-# Run SFT
+```bash
+# Run SFT training
 bash script/sft/sft_B200.sh
 ```
 
 #### RL (Reinforcement Learning with GRPO)
 
 ```bash
-# Prepare RL data
-python dataprocess/prepare_rl_data.py
+# Install VERL first
+cd verl && pip install -e . && cd ..
 
 # Run GRPO training
 bash script/RL/run_grpo_B200.sh
@@ -202,18 +237,18 @@ bash script/RL/run_grpo_B200.sh
 
 ## 🔧 Key Dependencies
 
-- **[ms-swift](https://github.com/modelscope/ms-swift)**: Model inference framework
-- **[vLLM](https://github.com/vllm-project/vllm)**: High-performance LLM serving
+- **[ms-swift](https://github.com/modelscope/ms-swift)**: Model inference framework (VllmEngine for Qwen2.5-VL)
+- **[vLLM](https://github.com/vllm-project/vllm)**: High-performance VLM serving
 - **[VERL](https://github.com/volcengine/verl)**: RL training framework (modified fork included)
-- **[Trimesh](https://trimsh.org/)**: 3D mesh processing
-- **[Blender](https://www.blender.org/)**: Scene rendering (v3.6+)
+- **[Trimesh](https://trimsh.org/)**: 3D mesh collision detection
+- **[Blender](https://www.blender.org/)**: Scene rendering (v4.0.2)
 - **[Shapely](https://shapely.readthedocs.io/)**: 2D geometry operations
 
 ---
 
 ## 📄 License
 
-This project is released under the MIT License.
+This project is released under the MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 

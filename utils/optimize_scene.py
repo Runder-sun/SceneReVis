@@ -1,48 +1,19 @@
-#!/usr/bin/env python
-"""Batch optimize bedroom and dining_room scenes - integrated version without subprocess."""
 import os
 import sys
 import json
-import glob
 import argparse
 import numpy as np
 import trimesh
 import copy
 import time
 import random
-from pathlib import Path
-from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
-from concurrent.futures import ProcessPoolExecutor, as_completed
-import multiprocessing
+from pathlib import Path
 
-# Azure OpenAI imports
-from openai import AzureOpenAI
-from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential, get_bearer_token_provider
-
-# Azure OpenAI配置
-AZURE_OPENAI_ENDPOINT = "YOUR_AZURE_OPENAI_ENDPOINT"
-AZURE_OPENAI_DEPLOYMENT_NAME = "YOUR_DEPLOYMENT_NAME"
-AZURE_OPENAI_API_VERSION = "2025-03-01-preview"
-AZURE_OPENAI_SCOPE = "YOUR_AZURE_OPENAI_SCOPE"
-
-def setup_azure_client():
-    """Setup Azure OpenAI client with proper authentication."""
-    credential = ChainedTokenCredential(
-        AzureCliCredential(),
-        ManagedIdentityCredential()
-    )
-    token_provider = get_bearer_token_provider(credential, AZURE_OPENAI_SCOPE)
-    
-    client = AzureOpenAI(
-        api_version=AZURE_OPENAI_API_VERSION,
-        azure_endpoint=AZURE_OPENAI_ENDPOINT,
-        azure_ad_token_provider=token_provider
-    )
-    return client
-
-# Add eval directory to path to import myeval
-sys.path.append(os.path.join(os.path.dirname(__file__), 'eval'))
+# Add project root to path so we can import eval.myeval
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if _project_root not in sys.path:
+    sys.path.insert(0, _project_root)
 
 from eval.myeval import (
     parse_scene_data,
@@ -53,14 +24,42 @@ from eval.myeval import (
     check_object_out_of_bounds
 )
 
+# Azure OpenAI configuration (read from environment variables)
+AZURE_OPENAI_ENDPOINT = os.environ.get("AZURE_OPENAI_ENDPOINT", "YOUR_AZURE_OPENAI_ENDPOINT")
+AZURE_OPENAI_DEPLOYMENT_NAME = os.environ.get("AZURE_OPENAI_DEPLOYMENT_NAME", "YOUR_DEPLOYMENT_NAME")
+AZURE_OPENAI_API_VERSION = os.environ.get("AZURE_OPENAI_API_VERSION", "2025-03-01-preview")
+AZURE_OPENAI_SCOPE = os.environ.get("AZURE_OPENAI_SCOPE", "YOUR_AZURE_OPENAI_SCOPE")
+
+
+def setup_azure_client():
+    """Create AzureOpenAI client using Azure CLI or managed identity tokens."""
+    from openai import AzureOpenAI
+    from azure.identity import AzureCliCredential, ManagedIdentityCredential, ChainedTokenCredential, get_bearer_token_provider
+    credential = get_bearer_token_provider(
+        ChainedTokenCredential(
+            AzureCliCredential(),
+            ManagedIdentityCredential(),
+        ),
+        AZURE_OPENAI_SCOPE,
+    )
+    client = AzureOpenAI(
+        azure_endpoint=AZURE_OPENAI_ENDPOINT,
+        azure_ad_token_provider=credential,
+        api_version=AZURE_OPENAI_API_VERSION,
+    )
+    return client
 
 class SceneOptimizer:
-    def __init__(self, scene_json, models_path, format_type='ours', client=None):
-        self.scene_json = scene_json
+    def __init__(self, scene_file, models_path, format_type='ours', client=None):
+        self.scene_file = scene_file
         self.models_path = models_path
         self.format_type = format_type
         self.client = client
         
+        # Load scene data
+        with open(scene_file, 'r') as f:
+            self.scene_json = json.load(f)
+            
         # Parse initial data
         self.bounds_bottom, self.bounds_top, self.objects_data = parse_scene_data(self.scene_json, format_type)
         
@@ -76,10 +75,10 @@ class SceneOptimizer:
         self.room_center = np.mean(bounds_bottom_arr, axis=0)
         
         # Cache for base meshes (untransformed)
-        self.mesh_cache = {}
+        self.mesh_cache = {} # (asset_source, asset_id) -> mesh
         
         # Object importance cache
-        self.object_importance = {}
+        self.object_importance = {} # jid -> 'Key' or 'Non-Key'
 
     def get_base_mesh(self, obj_data):
         asset_source = obj_data.get('asset_source', '3d-future')
@@ -115,7 +114,7 @@ class SceneOptimizer:
                 else:
                     mesh = loaded
             except Exception as e:
-                pass
+                print(f"Error loading mesh {model_path}: {e}")
         
         if mesh is None:
             # Fallback box
@@ -161,6 +160,7 @@ class SceneOptimizer:
         meshes = {}
         for i, obj in enumerate(self.objects_data):
             jid = get_object_field(obj, 'jid', self.format_type)
+            # Use index to ensure uniqueness
             key = f"{i}_{jid}"
             meshes[key] = self.get_transformed_mesh(obj)
         return meshes
@@ -197,24 +197,17 @@ class SceneOptimizer:
         return colliding_indices, oob_indices, manager
 
     def consult_gpt(self, indices_to_check):
-        """使用GPT判断物体重要性，如果没有client则使用规则判断"""
+        # Filter indices that are not yet classified
+        # Note: Since we might delete objects, indices shift. 
+        # But we rebuild the list and clear cache if we delete.
+        # So here we just check if we have info for current indices.
+        # Actually, if we clear cache, we re-ask. That's fine.
+        
         unknown_indices = [i for i in indices_to_check if i not in self.object_importance]
         if not unknown_indices:
             return
-        
-        # 如果没有 GPT client，使用基于规则的判断
-        if self.client is None:
-            # 简单规则：根据物体描述判断重要性
-            key_keywords = ['bed', 'sofa', 'couch', 'table', 'dining', 'desk', 'wardrobe', 'cabinet', 
-                           'chair', 'tv', 'television', 'refrigerator', 'stove', 'sink']
-            for i in unknown_indices:
-                obj = self.objects_data[i]
-                desc = get_object_field(obj, 'desc', self.format_type).lower()
-                # 检查是否包含关键物品关键词
-                is_key = any(kw in desc for kw in key_keywords)
-                self.object_importance[i] = 'Key' if is_key else 'Non-Key'
-            return
             
+        # Prepare prompt
         objects_desc = []
         for i in unknown_indices:
             obj = self.objects_data[i]
@@ -244,6 +237,7 @@ ID 1: Non-Key
             )
             content = response.choices[0].message.content
             
+            # Parse response
             for line in content.split('\n'):
                 if ':' in line:
                     parts = line.split(':')
@@ -259,20 +253,31 @@ ID 1: Non-Key
                         except:
                             pass
         except Exception as e:
+            print(f"GPT Error: {e}")
+            # Default to Key if error
             for i in unknown_indices:
                 self.object_importance[i] = 'Key'
 
     def optimize(self, max_steps=20):
+        print(f"Starting optimization for {len(self.objects_data)} objects...")
+        
         for step in range(max_steps):
             colliding_indices, oob_indices, manager = self.check_physics()
             problematic_indices = colliding_indices.union(oob_indices)
             
             if not problematic_indices:
+                print(f"Step {step}: No issues found! Optimization complete.")
                 break
                 
+            print(f"Step {step}: Found {len(colliding_indices)} colliding, {len(oob_indices)} OOB.")
+            
+            # Consult GPT
             self.consult_gpt(problematic_indices)
             
+            # Actions
             indices_to_delete = set()
+            
+            # Sort indices descending to delete safely later
             sorted_indices = sorted(list(problematic_indices), reverse=True)
             
             for idx in sorted_indices:
@@ -280,19 +285,26 @@ ID 1: Non-Key
                 
                 if importance == 'Non-Key':
                     indices_to_delete.add(idx)
+                    print(f"  Deleting Non-Key object {idx}")
                 else:
+                    # Try to move Key object
                     obj = self.objects_data[idx]
                     
                     if idx in oob_indices:
+                        # Move towards center
                         current_pos = np.array(obj['pos'])
+                        # Move only X, Z
                         direction = self.room_center - current_pos
                         direction[1] = 0 
                         if np.linalg.norm(direction) > 1e-6:
                             direction = direction / np.linalg.norm(direction)
+                            # Move by 0.2m
                             new_pos = current_pos + direction * 0.2
                             obj['pos'] = new_pos.tolist()
+                            print(f"  Moving Key object {idx} (OOB) towards center")
                             
                     elif idx in colliding_indices:
+                        # Try to resolve collision with fine-tuning
                         jid = get_object_field(obj, 'jid', self.format_type)
                         name = f"{idx}_{jid}"
                         
@@ -304,7 +316,7 @@ ID 1: Non-Key
                             
                             # Strategy 1: Position fine-tuning (Try 10 times)
                             for _ in range(10):
-                                offset = (np.random.rand(3) - 0.5) * 0.2  # +/- 0.1m
+                                offset = (np.random.rand(3) - 0.5) * 0.2 # +/- 0.1m
                                 offset[1] = 0
                                 test_pos = (np.array(original_pos) + offset).tolist()
                                 obj['pos'] = test_pos
@@ -312,6 +324,7 @@ ID 1: Non-Key
                                 test_mesh = self.get_transformed_mesh(obj)
                                 if not manager.in_collision_single(test_mesh):
                                     solved = True
+                                    print(f"  Resolved collision for {idx} via position shift")
                                     manager.add_object(name, test_mesh)
                                     break
                             
@@ -330,6 +343,7 @@ ID 1: Non-Key
                                     test_mesh = self.get_transformed_mesh(obj)
                                     if not manager.in_collision_single(test_mesh):
                                         solved = True
+                                        print(f"  Resolved collision for {idx} via rotation")
                                         manager.add_object(name, test_mesh)
                                         break
                                         
@@ -343,6 +357,7 @@ ID 1: Non-Key
                                 offset[1] = 0
                                 obj['pos'] = (current_pos + offset).tolist()
                                 
+                                print(f"  Could not resolve {idx} cleanly, applying random perturbation")
                                 manager.add_object(name, self.get_transformed_mesh(obj))
                         else:
                             # Fallback if name mismatch (should not happen)
@@ -350,220 +365,49 @@ ID 1: Non-Key
                             offset = (np.random.rand(3) - 0.5) * 0.2
                             offset[1] = 0
                             obj['pos'] = (current_pos + offset).tolist()
+                            print(f"  Perturbing Key object {idx} (Collision) - Manager fallback")
 
+            # Apply deletions
             if indices_to_delete:
                 self.objects_data = [obj for i, obj in enumerate(self.objects_data) if i not in indices_to_delete]
-                self.object_importance = {}
+                self.object_importance = {} # Clear cache as indices changed
                 
         return self.objects_data
 
-    def get_optimized_json(self):
+    def save_scene(self, output_path):
         new_json = copy.deepcopy(self.scene_json)
         
+        # Flatten structure to 'objects' list
         if 'groups' in new_json:
             del new_json['groups']
         
+        # Handle respace format structure if needed
         if self.format_type == 'respace' and 'scene' in new_json and 'objects' in new_json['scene']:
              new_json['scene']['objects'] = self.objects_data
         else:
              new_json['objects'] = self.objects_data
             
-        return new_json
-
-
-def optimize_single_scene(args):
-    """优化单个场景文件（用于多进程）"""
-    scene_file, output_file, format_type, models_path = args
-    
-    try:
-        with open(scene_file, 'r') as f:
-            scene_json = json.load(f)
-        
-        # 不使用 GPT，直接基于规则优化
-        optimizer = SceneOptimizer(scene_json, models_path, format_type, client=None)
-        optimizer.optimize()
-        optimized_json = optimizer.get_optimized_json()
-        
-        with open(output_file, 'w') as f:
-            json.dump(optimized_json, f, indent=2)
-        
-        return (True, scene_file.name, None)
-    except Exception as e:
-        return (False, scene_file.name, str(e))
-
-
-def batch_optimize_parallel(input_dir, output_dir, format_type, models_path, num_workers=None):
-    """并行优化一个房间类型中的所有场景"""
-    input_path = Path(input_dir)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    scene_files = sorted(list(input_path.glob("*_final_scene.json")))
-    scene_files = [f for f in scene_files if 'evaluation_results' not in f.name]
-    
-    print(f"Found {len(scene_files)} scenes to optimize in {input_dir}")
-    
-    if len(scene_files) == 0:
-        return 0, 0
-
-    # 准备任务参数
-    tasks = []
-    for scene_file in scene_files:
-        output_file = output_path / scene_file.name
-        if not output_file.exists():
-            tasks.append((scene_file, output_file, format_type, models_path))
-    
-    already_done = len(scene_files) - len(tasks)
-    print(f"  {already_done} already optimized, {len(tasks)} to process")
-    
-    if len(tasks) == 0:
-        return already_done, 0
-
-    if num_workers is None:
-        num_workers = min(multiprocessing.cpu_count(), len(tasks), 8)
-    
-    success_count = already_done
-    fail_count = 0
-    
-    with ProcessPoolExecutor(max_workers=num_workers) as executor:
-        futures = {executor.submit(optimize_single_scene, task): task for task in tasks}
-        
-        for future in tqdm(as_completed(futures), total=len(tasks), desc=f"Optimizing {input_path.name}"):
-            success, filename, error = future.result()
-            if success:
-                success_count += 1
-            else:
-                fail_count += 1
-                print(f"\n  Error: {filename}: {error}")
-    
-    print(f"\nCompleted: {success_count} success, {fail_count} failed")
-    return success_count, fail_count
-
-
-def batch_optimize(input_dir, output_dir, format_type, client, models_path):
-    """原始的顺序优化函数（保留兼容性）"""
-    input_path = Path(input_dir)
-    output_path = Path(output_dir)
-    output_path.mkdir(parents=True, exist_ok=True)
-
-    scene_files = sorted(list(input_path.glob("*_final_scene.json")))
-    scene_files = [f for f in scene_files if 'evaluation_results' not in f.name]
-    
-    print(f"Found {len(scene_files)} scenes to optimize in {input_dir}")
-
-    success_count = 0
-    fail_count = 0
-    
-    for scene_file in tqdm(scene_files, desc=f"Optimizing {input_path.name}"):
-        output_file = output_path / scene_file.name
-        
-        if output_file.exists():
-            success_count += 1
-            continue
-        
-        try:
-            with open(scene_file, 'r') as f:
-                scene_json = json.load(f)
-            
-            optimizer = SceneOptimizer(scene_json, models_path, format_type, client)
-            optimizer.optimize()
-            optimized_json = optimizer.get_optimized_json()
-            
-            with open(output_file, 'w') as f:
-                json.dump(optimized_json, f, indent=2)
-            
-            success_count += 1
-        except Exception as e:
-            print(f"\nError optimizing {scene_file.name}: {e}")
-            fail_count += 1
-    
-    print(f"\nCompleted: {success_count} success, {fail_count} failed")
-    return success_count, fail_count
-
-
-def process_room_type(args):
-    """处理单个房间类型（用于房间类型级别的并行）"""
-    room, base_dir, format_type, models_path, num_scene_workers = args
-    
-    input_dir = os.path.join(base_dir, room, 'final_scenes_collection')
-    output_dir = os.path.join(base_dir, room, 'optimized_scenes')
-    
-    if not os.path.exists(input_dir):
-        print(f"Directory not found: {input_dir}")
-        return room, 0, 0
-    
-    print(f"\n{'='*60}")
-    print(f"Processing {room}")
-    print(f"{'='*60}")
-    
-    success, fail = batch_optimize_parallel(input_dir, output_dir, format_type, models_path, num_scene_workers)
-    return room, success, fail
-
+        with open(output_path, 'w') as f:
+            json.dump(new_json, f, indent=2)
+        print(f"Saved optimized scene to {output_path}")
 
 def main():
-    parser = argparse.ArgumentParser(description='Batch optimize scenes')
-    parser.add_argument('--rooms', nargs='+', default=['bedroom', 'dining_room'],
-                       help='Room types to optimize')
-    parser.add_argument('--base_dir', type=str, 
-                       default='/path/to/SceneReVis/output/rl_ood_B200_v6_e3_s80',
-                       help='Base output directory')
-    parser.add_argument('--format', type=str, default='respace',
-                       help='Scene format (ours or respace)')
-    parser.add_argument('--models_path', type=str,
+    parser = argparse.ArgumentParser(description='Optimize scene layout to fix collisions and OOB.')
+    parser.add_argument('--scene_file', type=str, required=True, help='Path to input scene JSON')
+    parser.add_argument('--output_file', type=str, required=True, help='Path to output scene JSON')
+    parser.add_argument('--models_path', type=str, 
                        default='/path/to/datasets/3d-front/3D-FUTURE-model/',
                        help='Path to 3D models')
-    parser.add_argument('--parallel_rooms', action='store_true',
-                       help='Process multiple room types in parallel')
-    parser.add_argument('--room_workers', type=int, default=None,
-                       help='Number of room types to process in parallel')
-    parser.add_argument('--scene_workers', type=int, default=4,
-                       help='Number of scenes to optimize in parallel per room type')
+    parser.add_argument('--format', type=str, default='ours', choices=['ours', 'respace'],
+                       help='Scene format')
+    
     args = parser.parse_args()
     
-    print(f"Parallel mode: rooms={args.parallel_rooms}, scene_workers={args.scene_workers}")
+    client = setup_azure_client()
     
-    total_success = 0
-    total_fail = 0
-    
-    if args.parallel_rooms and len(args.rooms) > 1:
-        # 并行处理多个房间类型
-        room_workers = args.room_workers or len(args.rooms)
-        print(f"Processing {len(args.rooms)} room types in parallel with {room_workers} workers")
-        
-        tasks = [(room, args.base_dir, args.format, args.models_path, args.scene_workers) 
-                 for room in args.rooms]
-        
-        with ProcessPoolExecutor(max_workers=room_workers) as executor:
-            futures = {executor.submit(process_room_type, task): task[0] for task in tasks}
-            
-            for future in as_completed(futures):
-                room, success, fail = future.result()
-                total_success += success
-                total_fail += fail
-                print(f"\n[{room}] Done: {success} success, {fail} failed")
-    else:
-        # 顺序处理房间类型，但并行处理每个房间内的场景
-        for room in args.rooms:
-            input_dir = os.path.join(args.base_dir, room, 'final_scenes_collection')
-            output_dir = os.path.join(args.base_dir, room, 'optimized_scenes')
-            
-            if not os.path.exists(input_dir):
-                print(f"Directory not found: {input_dir}")
-                continue
-                
-            print(f"\n{'='*60}")
-            print(f"Processing {room}")
-            print(f"{'='*60}")
-            
-            success, fail = batch_optimize_parallel(input_dir, output_dir, args.format, 
-                                                    args.models_path, args.scene_workers)
-            total_success += success
-            total_fail += fail
-    
-    print(f"\n{'='*60}")
-    print(f"TOTAL: {total_success} success, {total_fail} failed")
-    print(f"{'='*60}")
-
+    optimizer = SceneOptimizer(args.scene_file, args.models_path, args.format, client)
+    optimizer.optimize()
+    optimizer.save_scene(args.output_file)
 
 if __name__ == "__main__":
     main()
