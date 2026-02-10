@@ -67,13 +67,10 @@ SceneReVis/
 │       ├── trainer/              # Training orchestration
 │       └── ...
 │
-├── split_prompts/                # Test prompts (550 total across 7 room types)
+├── split_prompts/                # Test prompts (400 total across 4 room types)
 │   ├── bedroom.txt               # 150 prompts
 │   ├── living_room.txt           # 150 prompts
 │   ├── dining_room.txt           # 50 prompts
-│   ├── entertainment_room.txt    # 50 prompts
-│   ├── gym.txt                   # 50 prompts
-│   ├── office.txt                # 50 prompts
 │   └── study_room.txt            # 50 prompts
 │
 ├── metadata/                     # Asset metadata
@@ -113,16 +110,45 @@ bash quick_install_blender.sh
 cd verl && pip install -e . && cd ..
 ```
 
-### 2. Download Required Assets
+### 2. Download & Prepare Assets
 
 #### 3D-FUTURE Models (Required)
-Download from [3D-FUTURE](https://tianchi.aliyun.com/specials/promotion/alibaba-3d-future) and extract to your datasets directory.
 
-#### Objaverse GLB Assets (Optional)
-Objaverse assets are downloaded on-demand during inference via `utils/objaverse_glb_manager.py`. For evaluation, pre-download is recommended as the evaluation scripts only look at the local cache.
+1. Download the **3D-FUTURE** asset catalog from [Alibaba Tianchi](https://tianchi.aliyun.com/dataset/98063) (requires account + approval).
+2. Download the **3D-FRONT** scene dataset from [Alibaba Tianchi](https://tianchi.aliyun.com/dataset/65347).
+3. **Preprocessing**: Follow the preprocessing pipeline from [ReSpace](https://github.com/GradientSpaces/respace) to scale and prepare 3D-FUTURE assets:
+   ```bash
+   # Inside the ReSpace repo
+   # 1. Set paths in .env file:
+   #    PTH_3DFUTURE_ASSETS=/path/to/3D-FUTURE-model
+   #    PTH_3DFRONT_SCENES=/path/to/3D-FRONT
+   # 2. Scale assets to real-world sizes
+   python ./src/preprocessing/3d-front/scale_assets.py
+   # 3. Pre-compute asset embeddings for retrieval (or download the cached .pickle file)
+   python ./src/preprocessing/3d-front/06_compute_embeds.py
+   ```
+   Alternatively, download the pre-computed embeddings cache (`model_info_3dfuture_assets_embeds.pickle`, ~174MB) from the ReSpace release.
+
+#### Objaverse Assets & Annotations (Optional, for `--asset-source objaverse`)
+
+Objaverse GLB models are downloaded on-demand during inference via `utils/objaverse_glb_manager.py`. However, you need the **Objaverse annotation files** for asset retrieval. Follow [Holodeck](https://github.com/allenai/Holodeck) to download them:
+
+```bash
+pip install objathor
+
+# Download Objaverse annotations and features (saved to ~/.objathor-assets/ by default)
+python -m objathor.dataset.download_annotations --version 2023_09_23
+python -m objathor.dataset.download_features --version 2023_09_23
+
+# (Optional) Download full Objaverse assets for offline use
+python -m objathor.dataset.download_assets --version 2023_09_23
+python -m objathor.dataset.download_holodeck_base_data --version 2023_09_23
+```
+
+> **Note**: By default these save to `~/.objathor-assets/`. You can change the path via `--path` argument and set `OBJATHOR_ASSETS_BASE_DIR` environment variable accordingly.
 
 #### Metadata Files
-The `metadata/` directory contains JSON metadata for 3D-FUTURE assets. You also need the embeddings pickle file (`model_info_3dfuture_assets_embeds.pickle`) for asset retrieval — download it separately due to its size.
+The `metadata/` directory contains JSON metadata for 3D-FUTURE assets. You also need the embeddings pickle file (`model_info_3dfuture_assets_embeds.pickle`) for asset retrieval — see the 3D-FUTURE section above for how to obtain it.
 
 ### 3. Configuration
 
@@ -149,17 +175,60 @@ export RAY_IGNORE_UNHANDLED_ERRORS=1
 
 ### 4. Inference
 
+#### Mode 1: Model-based Scene Initialization (default)
+
+The fine-tuned model generates the initial scene layout (room + objects), then iteratively refines it:
+
 ```bash
-# Single scene generation
 python infer.py \
     --prompt "Design a cozy bedroom with a queen bed and reading corner" \
     --model /path/to/checkpoint \
     --iterations 10 \
     --generate-room \
     --use-model-for-creation \
-    --asset-source objaverse
+    --asset-source auto
+```
 
-# Batch inference (sequential processing)
+#### Mode 2: GPT-based Object Initialization
+
+Use GPT (Azure OpenAI) to generate the initial complete scene with furniture objects, then let the fine-tuned model refine it iteratively. This mode requires Azure OpenAI credentials to be configured:
+
+```bash
+python infer.py \
+    --prompt "Design a cozy bedroom with a queen bed and reading corner" \
+    --model /path/to/checkpoint \
+    --iterations 10 \
+    --generate-room \
+    --use-gpt-with-objects \
+    --asset-source auto
+```
+
+#### Mode 3: With Physics Optimization
+
+Enable GPT-assisted physics optimization after each iteration to automatically resolve collisions and out-of-bounds issues. Can be combined with any initialization mode:
+
+```bash
+python infer.py \
+    --prompt "Design a modern living room with a sectional sofa" \
+    --model /path/to/checkpoint \
+    --iterations 10 \
+    --generate-room \
+    --use-model-for-creation \
+    --asset-source auto \
+    --enable-physics-optimization \
+    --physics-opt-steps 5 \
+    --models-path /path/to/3D-FUTURE-model
+```
+
+You can also enable additional feedback injection:
+- `--enable-physics-feedback`: Inject physics collision/OOB feedback into prompts
+- `--enable-vlm-feedback`: Inject VLM layout assessment feedback into prompts (requires Azure OpenAI)
+
+#### Mode 4: Batch Inference
+
+Process multiple prompts from a file sequentially:
+
+```bash
 python infer.py \
     --batch-mode \
     --model /path/to/checkpoint \
@@ -181,14 +250,12 @@ SCENES_DIR="./output/bedroom/final_scenes_collection"
 
 # Mesh-based collision & OOB evaluation
 python eval/myeval.py \
-    --format respace \
     --scenes_dir $SCENES_DIR \
     --models_path /path/to/3D-FUTURE-model \
     --output_dir ./output/bedroom/evaluation
 
 # Voxel-based evaluation
 python eval/voxel_eval.py \
-    --format respace \
     --scenes_dir $SCENES_DIR \
     --models_path /path/to/3D-FUTURE-model \
     --output_file ./output/bedroom/evaluation/voxel_results.json \
@@ -229,9 +296,9 @@ bash script/RL/run_grpo_B200.sh
 |--------|-------------|------|
 | Collision Rate | % of objects with physical overlaps | `myeval.py` / `voxel_eval.py` |
 | Out-of-Bounds Rate | % of objects outside room boundaries | `myeval.py` / `voxel_eval.py` |
-| VLM Rationality | Scene rationality score (0-100) | `vlm_scene_eval.py` |
-| VLM Spatial Layout | Layout quality score (0-100) | `vlm_scene_eval.py` |
-| VLM Accessibility | Accessibility score (0-100) | `vlm_scene_eval.py` |
+| VLM Rationality | Scene rationality score (0-10) | `vlm_scene_eval.py` |
+| VLM Spatial Layout | Layout quality score (0-10) | `vlm_scene_eval.py` |
+| VLM Accessibility | Accessibility score (0-10) | `vlm_scene_eval.py` |
 
 ---
 
