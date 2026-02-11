@@ -557,8 +557,8 @@ def evaluate_scene_file_wrapper(json_file_path: str, models_base_path: str, voxe
             return {
                 'scene_name': os.path.basename(json_file_path),
                 'success': False,
-'error': 'Evaluation failed'
-        }
+                'error': 'Evaluation failed'
+            }
     except Exception as e:
         return {
             'scene_name': os.path.basename(json_file_path),
