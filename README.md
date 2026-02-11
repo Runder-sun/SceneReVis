@@ -330,7 +330,7 @@ If you find SceneReVis useful in your research, please consider citing:
 ```bibtex
 @article{zhao2026scenerevis,
   title={SceneReVis: A Self-Reflective Vision-Grounded Framework for 3D Indoor Scene Synthesis via Multi-turn RL},
-  author={Zhao, Yang and Sun, Shizhao and Zhang, Meisheng and Shi, Yingdong and Yang, Xubo and Bian, Jiang},
+  author={Yang Zhao and Shizhao Sun and Meisheng Zhang and Yingdong Shi and Xubo Yang and Jiang Bian},
   journal={arXiv preprint arXiv:2602.09432},
   year={2026}
 }
