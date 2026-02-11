@@ -315,10 +315,10 @@ class AssetRetrievalModule(nn.Module):
 			size_sampled_obj = asset.get("size")
 
 		new_obj = copy.deepcopy(obj)
-		new_obj["jid"] = jid_sampled_obj  # 只更新 jid 字段
-		new_obj["asset_source"] = "3d-future"  # 标记资产来源为 3D-FUTURE
+		new_obj["jid"] = jid_sampled_obj  # Only update the jid field
+		new_obj["asset_source"] = "3d-future"  # Mark asset source as 3D-FUTURE
 		if size_sampled_obj:
-			new_obj["retrieved_size"] = size_sampled_obj  # 记录检索到的实际尺寸
+			new_obj["retrieved_size"] = size_sampled_obj  # Record the actual retrieved size
 
 		if self.do_print:
 			print(obj)
@@ -328,15 +328,15 @@ class AssetRetrievalModule(nn.Module):
 
 	def sample_all_assets(self, scene, batch_size=64, is_greedy_sampling=True):
 		"""
-		为场景中的所有对象采样资产。
-		同时支持两种场景格式:
-		- 旧格式: scene["objects"] = [obj1, obj2, ...]
-		- 分组格式: scene["groups"] = [{"objects": [obj1, obj2, ...]}, ...]
+		Sample assets for all objects in the scene.
+		Supports two scene formats:
+		- Legacy format: scene["objects"] = [obj1, obj2, ...]
+		- Grouped format: scene["groups"] = [{"objects": [obj1, obj2, ...]}, ...]
 		"""
 		
-		# 1. 从场景中提取所有对象，并记录它们的原始位置
+		# 1. Extract all objects from the scene and record their original locations
 		all_objects = []
-		object_locations = []  # 用于追踪每个对象的来源 (哪个组，哪个位置)
+		object_locations = []  # Track the source of each object (which group, which index)
 		
 		if 'groups' in scene:
 			for group_idx, group in enumerate(scene.get('groups', [])):
@@ -349,42 +349,42 @@ class AssetRetrievalModule(nn.Module):
 				object_locations.append(('objects', obj_idx))
 		
 		if self.do_print: 
-			print(f"开始采样整个场景... (对象总数: {len(all_objects)})")
+			print(f"Starting to sample the entire scene... (total objects: {len(all_objects)})")
 			if 'groups' in scene:
-				print(f"使用 'groups' 格式，共 {len(scene.get('groups', []))} 个组")
+				print(f"Using 'groups' format with {len(scene.get('groups', []))} groups")
 			else:
-				print(f"使用 'objects' 旧格式")
+				print(f"Using legacy 'objects' format")
 
-		# 初始化
+		# Initialization
 		sampled_scene = copy.deepcopy(scene)
-		desc_size_map = {}  # 缓存，用于跨批次复用 jid
+		desc_size_map = {}  # Cache for reusing jids across batches
 		descriptions = [obj.get("desc") for obj in all_objects]
 		sizes = [obj.get("size", []) for obj in all_objects]
-		sampled_objects = [] # 存储最终采样完成的对象列表
+		sampled_objects = [] # Store the final list of sampled objects
 		
-		# 2. 分批处理所有对象
+		# 2. Process all objects in batches
 		for batch_start in range(0, len(descriptions), batch_size):
 			batch_end = min(batch_start + batch_size, len(descriptions))
 			batch_descriptions = descriptions[batch_start:batch_end]
 			batch_sizes = sizes[batch_start:batch_end]
 			
-			# 为当前批次的所有对象独立计算概率
+			# Compute probabilities independently for all objects in the current batch
 			batch_probs = self.forward_batch(batch_descriptions, batch_sizes)
 
-			# 遍历批次中的每个对象
+			# Iterate over each object in the batch
 			for i, obj in enumerate(all_objects[batch_start:batch_end]):
 				desc = obj.get("desc")
 				size = obj.get("size", [])
 				
-				# 默认需要进行新的采样
+				# By default, perform a new sampling
 				should_sample_new = True
 				jid_to_reuse = None
 
-				# 检查是否可以复用之前批次处理过的对象的 jid
+				# Check if we can reuse a jid from a previously processed object
 				if desc in desc_size_map:
 					matching_obj = None
 					for cached_obj in desc_size_map[desc]:
-						# 注意：这里比较的是输入对象的尺寸，而非采样后资产的实际尺寸
+						# Note: comparing input object sizes here, not the actual sizes of sampled assets
 						if self.calculate_size_difference(size, cached_obj["size"]) <= self.asset_size_threshold:
 							matching_obj = cached_obj
 							break
@@ -392,37 +392,37 @@ class AssetRetrievalModule(nn.Module):
 						should_sample_new = False
 						jid_to_reuse = matching_obj["jid"]
 
-				# 根据判断结果，执行采样或复用
+				# Based on the decision, either sample or reuse
 				if should_sample_new:
-					# 使用为当前对象独立计算的概率 batch_probs[i] 进行采样
+					# Sample using the independently computed probabilities batch_probs[i]
 					new_obj = self.create_sampled_obj(obj, batch_probs[i], is_greedy_sampling)
-					# 将新采样的结果添加到缓存中，以备后续批次使用
+					# Add the newly sampled result to the cache for use in subsequent batches
 					if desc in desc_size_map:
 						desc_size_map[desc].append(new_obj)
 					else:
 						desc_size_map[desc] = [new_obj]
 				else:
-					# 复用之前找到的 jid
+					# Reuse the previously found jid
 					new_obj = copy.deepcopy(obj)
 					new_obj["jid"] = jid_to_reuse
 				
 				sampled_objects.append(new_obj)
 		
-		# 3. 将采样后的对象放回其在场景中的原始位置
+		# 3. Place the sampled objects back into their original positions in the scene
 		if 'groups' in scene:
-			# 首先，清空场景副本中所有组的 objects 列表，准备重新填充
+			# First, clear the objects lists in all groups of the scene copy, preparing to refill
 			for group in sampled_scene.get('groups', []):
 				group['objects'] = []
 			
-			# 然后，根据 object_locations 中的记录，将每个采样对象放回正确的组
+			# Then, place each sampled object back into the correct group based on object_locations
 			for i, location in enumerate(object_locations):
-				# location[0] 是类型 ('group' 或 'objects')
-				# location[1] 是组的索引
+				# location[0] is the type ('group' or 'objects')
+				# location[1] is the group index
 				group_idx = location[1]
 				sampled_scene['groups'][group_idx]['objects'].append(sampled_objects[i])
 					
 		elif 'objects' in scene:
-			# 对于旧格式，直接替换 objects 列表
+			# For the legacy format, directly replace the objects list
 			sampled_scene["objects"] = sampled_objects
 
 		return sampled_scene

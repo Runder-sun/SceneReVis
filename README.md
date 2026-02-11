@@ -1,7 +1,8 @@
 # SceneReVis
 
-**SceneReVis: Iterative 3D Indoor Scene Generation with Vision-Language Reinforcement Learning**
+**SceneReVis: A Self-Reflective Vision-Grounded Framework for 3D Indoor Scene Synthesis via Multi-turn RL**
 
+[![Project Page](https://img.shields.io/badge/🌐%20Project%20Page-SceneReVis-green)](https://scenerevis.github.io/)
 [![Model](https://img.shields.io/badge/🤗%20Model-SceneReVis--7B-yellow)](https://huggingface.co/runder1/SceneReVis-7B)
 [![Dataset](https://img.shields.io/badge/🤗%20Dataset-SceneChain--12K-blue)](https://huggingface.co/datasets/runder1/SceneChain-12K)
 
@@ -14,10 +15,9 @@ A closed-loop framework for generating physically plausible and aesthetically co
 SceneReVis operates through an iterative **Render → Evaluate → Revise** loop:
 
 1. **Initial Scene Scaffolding**: Generate room boundaries and functional groups from text prompts
-2. **Multi-modal Feedback Injection**: Combine physics feedback (collision/out-of-bounds detection via Trimesh) with VLM layout assessment
-3. **Tool-based Scene Editing**: Structured `tool_calls` for `add_object`, `move_object`, `rotate_object`, `scale_object`, `replace_object`, `remove_object`, and `terminate`
-4. **Asset Retrieval & Alignment**: Map abstract object descriptions to real 3D models (3D-FUTURE / Objaverse)
-5. **Automated Rendering**: Blender-based dual-view rendering (top-down + diagonal perspective)
+2. **Tool-based Scene Editing**: Structured `tool_calls` for `add_object`, `move_object`, `rotate_object`, `scale_object`, `replace_object`, `remove_object`, and `terminate`
+3. **Asset Retrieval & Alignment**: Map abstract object descriptions to real 3D models (3D-FUTURE / Objaverse)
+4. **Automated Rendering**: Blender-based dual-view rendering (top-down + diagonal perspective)
 
 ### Training Pipeline
 
@@ -26,68 +26,7 @@ SceneReVis operates through an iterative **Render → Evaluate → Revise** loop
 
 ---
 
-## 📁 Project Structure
-
-```
-SceneReVis/
-├── infer.py                      # Inference: iterative scene generation (single & batch)
-│
-├── eval/                         # Evaluation tools
-│   ├── myeval.py                 # Mesh-based collision & OOB evaluation
-│   ├── voxel_eval.py             # Voxel-based spatial evaluation
-│   └── vlm_scene_eval.py         # VLM (GPT-4o Vision) multi-dimension evaluation
-│
-├── utils/                        # Core utilities
-│   ├── sample.py                 # 3D-FUTURE asset retrieval (SigLIP-based)
-│   ├── objaverse_retriever.py    # Objaverse asset retrieval (CLIP+SBERT)
-│   ├── objaverse_glb_manager.py  # Objaverse GLB asset download & caching
-│   ├── optimize_scene.py         # GPT-assisted scene physics optimization
-│   ├── scene_editor.py           # Scene editing operations (add/remove/move/etc.)
-│   ├── format_converter.py       # Scene format conversion (flat ↔ grouped)
-│   ├── blender_renderer.py       # Blender rendering engine
-│   ├── blender_wrapper.py        # Blender subprocess wrapper
-│   ├── main_bpy.py               # Blender script entry point
-│   ├── visualization_3d.py       # 3D visualization (bbox, arrows, grid)
-│   ├── RL_utils.py               # RL training utilities
-│   ├── path_config.py            # Unified path configuration manager
-│   ├── image_merger.py           # Multi-view image composition
-│   └── batch_render_all.py       # Batch rendering helper
-│
-├── script/                       # Training scripts
-│   ├── RL/                       # Reinforcement learning
-│   │   ├── scene_reward.py       # Reward function (voxel-based physics)
-│   │   ├── scene_editing_interaction.py  # Multi-turn RL interaction handler
-│   │   ├── run_grpo_B200.sh      # GRPO training launch script
-│   │   └── config/               # RL configuration files
-│   └── sft/                      # Supervised fine-tuning
-│       └── sft_B200.sh           # SFT training launch script
-│
-├── verl/                         # VERL RL framework (modified fork)
-│   └── verl/
-│       ├── interactions/         # Multi-turn interaction interfaces
-│       │   ├── base.py           # Base interaction class
-│       │   └── scene_editing_interaction.py  # Scene editing interaction
-│       ├── trainer/              # Training orchestration
-│       └── ...
-│
-├── split_prompts/                # Test prompts (400 total across 4 room types)
-│   ├── bedroom.txt               # 150 prompts
-│   ├── living_room.txt           # 150 prompts
-│   ├── dining_room.txt           # 50 prompts
-│   └── study_room.txt            # 50 prompts
-│
-├── metadata/                     # Asset metadata
-│   ├── model_info_3dfuture_assets.json
-│   └── invalid_threed_front_rooms.txt
-│
-├── requirements_infer_batch.txt  # Inference dependencies
-├── setup_env.sh                  # Environment variable setup
-└── quick_install_blender.sh      # Blender 4.0.2 installation
-```
-
----
-
-## 🚀 Quick Start
+##  Quick Start
 
 ### 1. Environment Setup
 
@@ -106,8 +45,8 @@ pip install -r requirements_infer_batch.txt
 pip install ms-swift vllm accelerate deepspeed
 pip install openai azure-identity
 pip install trimesh scipy shapely pillow numpy
+pip install swanlab wandb msgspec python-fcl
 pip install compress_json compress_pickle open_clip_torch sentence-transformers
-pip install swanlab msgspec python-fcl
 ```
 
 #### Environment 2: SFT Training
@@ -191,9 +130,6 @@ pip install objathor
 python -m objathor.dataset.download_annotations --version 2023_09_23
 python -m objathor.dataset.download_features --version 2023_09_23
 
-# (Optional) Download full Objaverse assets for offline use
-python -m objathor.dataset.download_assets --version 2023_09_23
-python -m objathor.dataset.download_holodeck_base_data --version 2023_09_23
 ```
 
 > **Note**: By default these save to `~/.objathor-assets/`. You can change the path via `--path` argument and set `OBJATHOR_ASSETS_BASE_DIR` environment variable accordingly.
@@ -391,10 +327,10 @@ This project is released under the MIT License. See [LICENSE](LICENSE) for detai
 If you find SceneReVis useful in your research, please consider citing:
 
 ```bibtex
-@article{scenerevis2025,
-  title={SceneReVis: Iterative 3D Indoor Scene Generation with Vision-Language Reinforcement Learning},
-  author={},
-  journal={},
-  year={2025}
+@article{zhao2026scenerevis,
+  title={SceneReVis: A Self-Reflective Vision-Grounded Framework for 3D Indoor Scene Synthesis via Multi-turn RL},
+  author={Zhao, Yang and Sun, Shizhao and Zhang, Meisheng and Shi, Yingdong and Yang, Xubo and Bian, Jiang},
+  journal={arXiv preprint arXiv:2602.09432},
+  year={2026}
 }
 ```

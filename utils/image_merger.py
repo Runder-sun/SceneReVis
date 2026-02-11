@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-图像合并工具：将俯视图和对角视图合并为一张图片，带边界框和标签
+Image merging tool: combines top view and diagonal view into a single image with bounding boxes and labels.
 """
 
 import os
@@ -12,38 +12,38 @@ def merge_rendered_views_with_annotations(top_view_path: Union[str, Path],
                                         diagonal_view_path: Union[str, Path], 
                                         output_path: Union[str, Path]):
     """
-    合并俯视图和斜视图到一张图片中，左右排列，保持透明背景，并添加边界框和标签
+    Merge top view and diagonal view into a single image, side by side, preserving transparent background, with bounding boxes and labels.
     """
-    # 加载图片并保持RGBA模式
+    # Load images and keep RGBA mode
     top_img = Image.open(top_view_path)
     diag_img = Image.open(diagonal_view_path)
     
-    # 确保图片都是RGBA模式以保持透明度
+    # Ensure images are in RGBA mode to preserve transparency
     if top_img.mode != 'RGBA':
         top_img = top_img.convert('RGBA')
     if diag_img.mode != 'RGBA':
         diag_img = diag_img.convert('RGBA')
     
-    # 获取图片尺寸
+    # Get image dimensions
     top_width, top_height = top_img.size
     diag_width, diag_height = diag_img.size
     
-    # 添加边框和标签的空间
+    # Space for borders and labels
     border_width = 4
     label_height = 30
     padding = 10
     
-    # 计算合并后的尺寸（包含边框和标签空间）
+    # Calculate merged dimensions (including borders and label space)
     view_width = max(top_width, diag_width) + 2 * border_width + 2 * padding
     view_height = max(top_height, diag_height) + 2 * border_width + label_height + 2 * padding
     merged_width = 2 * view_width
     merged_height = view_height
     
-    # 创建新的RGBA图片（透明背景）
+    # Create new RGBA image (transparent background)
     merged_img = Image.new('RGBA', (merged_width, merged_height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(merged_img)
     
-    # 尝试加载字体，如果失败则使用默认字体
+    # Try to load font, fall back to default if failed
     font = None
     try:
         font_paths = [
@@ -66,47 +66,47 @@ def merge_rendered_views_with_annotations(top_view_path: Union[str, Path],
         except:
             font = None
     
-    # 绘制左边的俯视图区域
+    # Draw left top view area
     left_x = padding
     left_y = padding + label_height
     
-    # 绘制左边的边界框（红色）
+    # Draw left bounding box (red)
     draw.rectangle([left_x - border_width, left_y - border_width, 
                    left_x + top_width + border_width, left_y + top_height + border_width], 
                    outline=(255, 0, 0, 255), width=border_width)
     
-    # 添加左边的标签（红色）
+    # Add left label (red)
     if font:
         draw.text((left_x, padding), "Top View", fill=(255, 0, 0, 255), font=font)
     
-    # 粘贴俯视图
+    # Paste top view
     merged_img.paste(top_img, (left_x, left_y), top_img if top_img.mode == 'RGBA' else None)
     
-    # 绘制右边的对角视图区域
+    # Draw right diagonal view area
     right_x = view_width + padding
     right_y = padding + label_height
     
-    # 绘制右边的边界框（蓝色）
+    # Draw right bounding box (blue)
     draw.rectangle([right_x - border_width, right_y - border_width, 
                    right_x + diag_width + border_width, right_y + diag_height + border_width], 
                    outline=(0, 0, 255, 255), width=border_width)
     
-    # 添加右边的标签（蓝色）
+    # Add right label (blue)
     if font:
         draw.text((right_x, padding), "Diagonal View", fill=(0, 0, 255, 255), font=font)
     
-    # 粘贴对角视图
+    # Paste diagonal view
     merged_img.paste(diag_img, (right_x, right_y), diag_img if diag_img.mode == 'RGBA' else None)
     
-    # 保存图片
-    # 如果需要RGB模式（不支持透明度），转换背景为白色
+    # Save image
+    # If RGB mode is needed (no transparency support), convert background to white
     if str(output_path).lower().endswith(('.jpg', '.jpeg')):
-        # JPEG不支持透明度，创建白色背景
+        # JPEG doesn't support transparency, create white background
         rgb_img = Image.new('RGB', merged_img.size, (255, 255, 255))
         rgb_img.paste(merged_img, mask=merged_img.split()[-1] if merged_img.mode == 'RGBA' else None)
         rgb_img.save(output_path, quality=95)
     else:
-        # PNG支持透明度
+        # PNG supports transparency
         merged_img.save(output_path)
     
     return True
@@ -115,19 +115,19 @@ def simple_merge_views(top_view_path: Union[str, Path],
                       diagonal_view_path: Union[str, Path], 
                       output_path: Union[str, Path]):
     """
-    简单的图像合并，左右排列，不添加边界框和标签
+    Simple image merge, side by side, without bounding boxes or labels.
     """
     from PIL import Image
     
     top_img = Image.open(top_view_path)
     diag_img = Image.open(diagonal_view_path)
     
-    # 调整大小使其一致
+    # Resize to consistent dimensions
     target_size = (512, 512)
     top_img = top_img.resize(target_size)
     diag_img = diag_img.resize(target_size)
     
-    # 水平合并
+    # Merge horizontally
     merged_img = Image.new('RGB', (1024, 512))
     merged_img.paste(top_img, (0, 0))
     merged_img.paste(diag_img, (512, 0))

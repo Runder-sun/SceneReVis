@@ -153,7 +153,7 @@ def parse_score_from_response(response: str) -> Optional[int]:
     patterns = [
         r'\b([1-9]|10)\s*/\s*10\b',  # "8/10"
         r'\bscore[:\s]*([1-9]|10)\b',
-        r'\b([1-9]|10)\s*(?:points?|分)\b',
+        r'\b([1-9]|10)\s*(?:points?)\b',
         r'^([1-9]|10)$',
         r'\b([1-9]|10)\b',
     ]
@@ -881,7 +881,7 @@ def collect_evaluation_tasks(render_dir: str, prompts_file: str, json_dir: str =
             candidates = []
             for i, p in enumerate(prompts):
                 p_clean = p.lower()
-                # 检查文件名是否是 prompt 的开头，或者 prompt 包含文件名
+                # Check if filename is the beginning of a prompt, or if the prompt contains the filename
                 if p_clean.startswith(stem_text) or stem_text in p_clean:
                     candidates.append(i)
             

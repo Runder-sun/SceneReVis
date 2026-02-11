@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-RL_utils.py - 强化学习工具模块
-提供场景渲染的封装函数，用于RL训练过程中的场景可视化
+RL_utils.py - Reinforcement Learning Utility Module
+Provides wrapper functions for scene rendering and visualization during RL training
 """
 
 import os
@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Union, Dict, Any, Optional, Tuple
 
-# 导入PIL用于图像处理
+# Import PIL for image processing
 try:
     from PIL import Image, ImageDraw, ImageFont
     PIL_AVAILABLE = True
@@ -21,7 +21,7 @@ except ImportError:
     PIL_AVAILABLE = False
     print("Warning: PIL not available, image processing will be limited")
 
-# 导入体素评估相关依赖
+# Import voxel evaluation dependencies
 try:
     import numpy as np
     import trimesh
@@ -35,44 +35,44 @@ except ImportError as e:
 
 
 # ============================================================================
-# 场景格式转换函数
-# 用于在flat格式（直接objects数组）和grouped格式（groups包含objects）之间转换
+# Scene Format Conversion Functions
+# Convert between flat format (direct objects array) and grouped format (groups containing objects)
 # ============================================================================
 
 def convert_flat_to_grouped(scene: Dict[str, Any]) -> Dict[str, Any]:
-    """将不带groups的场景格式转换为带groups的格式
+    """Convert scene format without groups to grouped format
     
     Args:
-        scene: 不带groups的场景数据，包含直接的objects数组
+        scene: Scene data without groups, containing a direct objects array
         
     Returns:
-        带groups的场景数据
+        Scene data with groups
     """
-    # 如果已经有groups字段，直接返回
+    # If groups field already exists, return directly
     if 'groups' in scene:
         return scene
     
-    # 如果没有objects字段，也直接返回
+    # If objects field doesn't exist, return directly
     if 'objects' not in scene:
         return scene
     
-    # 创建新的场景数据，保留原有的room信息
+    # Create new scene data, preserving original room information
     grouped_scene = {
         'room_type': scene.get('room_type', 'unknown'),
         'room_id': scene.get('room_id', 'room_001'),
     }
     
-    # 处理room_envelope或bounds字段
+    # Handle room_envelope or bounds fields
     if 'room_envelope' in scene:
         grouped_scene['room_envelope'] = scene['room_envelope']
     elif 'bounds_top' in scene and 'bounds_bottom' in scene:
-        # 将旧格式的bounds转换为room_envelope
+        # Convert old format bounds to room_envelope
         grouped_scene['room_envelope'] = {
             'bounds_top': scene['bounds_top'],
             'bounds_bottom': scene['bounds_bottom']
         }
     
-    # 将所有objects放入一个默认组
+    # Put all objects into a single default group
     grouped_scene['groups'] = [
         {
             'group_name': 'main_group',
@@ -87,31 +87,31 @@ def convert_flat_to_grouped(scene: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def convert_grouped_to_flat(scene: Dict[str, Any]) -> Dict[str, Any]:
-    """将带groups的场景格式转换回不带groups的格式
+    """Convert grouped scene format back to flat format without groups
     
     Args:
-        scene: 带groups的场景数据
+        scene: Scene data with groups
         
     Returns:
-        不带groups的场景数据，包含直接的objects数组
+        Scene data without groups, containing a direct objects array
     """
-    # 如果没有groups字段，直接返回
+    # If groups field doesn't exist, return directly
     if 'groups' not in scene:
         return scene
     
-    # 创建新的场景数据，保留原有的room信息
+    # Create new scene data, preserving original room information
     flat_scene = {
         'room_type': scene.get('room_type', 'unknown'),
         'room_id': scene.get('room_id', 'room_001'),
     }
     
-    # 处理room_envelope或bounds字段
+    # Handle room_envelope or bounds fields
     if 'room_envelope' in scene:
-        # 提取bounds到顶层
+        # Extract bounds to top level
         flat_scene['bounds_top'] = scene['room_envelope'].get('bounds_top', [])
         flat_scene['bounds_bottom'] = scene['room_envelope'].get('bounds_bottom', [])
     
-    # 收集所有组中的objects到一个数组
+    # Collect all objects from all groups into a single array
     all_objects = []
     for group in scene.get('groups', []):
         all_objects.extend(group.get('objects', []))
@@ -123,54 +123,54 @@ def convert_grouped_to_flat(scene: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ============================================================================
-# 全局单例模式和线程锁
-# 用于解决多线程环境下的线程安全问题
+# Global Singleton Pattern and Thread Locks
+# Used to solve thread safety issues in multi-threaded environments
 # ============================================================================
 
-# AssetRetrievalModule全局单例（解决CLIP模型线程安全）- 用于 3D-FUTURE
+# AssetRetrievalModule global singleton (resolves CLIP model thread safety) - for 3D-FUTURE
 _GLOBAL_ASSET_RETRIEVAL = None
 _ASSET_RETRIEVAL_LOCK = threading.Lock()
 
-# ObjaverseRetriever全局单例 - 用于 Objaverse
+# ObjaverseRetriever global singleton - for Objaverse
 _GLOBAL_OBJAVERSE_RETRIEVAL = None
 _OBJAVERSE_RETRIEVAL_LOCK = threading.Lock()
 
-# Blender渲染全局锁（解决Blender进程并发冲突）
+# Blender render global lock (resolves Blender process concurrency conflicts)
 _BLENDER_RENDER_LOCK = threading.Lock()
 
 
 def _get_global_objaverse_retrieval(params: Optional[Dict[str, Any]] = None):
     """
-    获取全局 ObjaverseRetriever 单例
-    线程安全，确保在每个进程中只初始化一次
+    Get global ObjaverseRetriever singleton
+    Thread-safe, ensures initialization only once per process
     
-    参数:
-        params: ObjaverseRetriever 初始化参数
+    Args:
+        params: ObjaverseRetriever initialization parameters
     
-    返回:
-        ObjaverseRetriever 实例，如果初始化失败则返回 None
+    Returns:
+        ObjaverseRetriever instance, or None if initialization fails
     """
     global _GLOBAL_OBJAVERSE_RETRIEVAL
     
-    # 快速路径：如果已经初始化，直接返回
+    # Fast path: if already initialized, return directly
     if _GLOBAL_OBJAVERSE_RETRIEVAL is not None:
         return _GLOBAL_OBJAVERSE_RETRIEVAL
     
-    # 加锁初始化
+    # Lock for initialization
     with _OBJAVERSE_RETRIEVAL_LOCK:
-        # 双重检查：可能在等待锁期间已被其他线程初始化
+        # Double-check: may have been initialized by another thread while waiting for lock
         if _GLOBAL_OBJAVERSE_RETRIEVAL is not None:
             return _GLOBAL_OBJAVERSE_RETRIEVAL
         
         try:
-            # 确保当前目录在 sys.path 中
+            # Ensure current directory is in sys.path
             utils_path = os.path.dirname(__file__)
             if utils_path not in sys.path:
                 sys.path.append(utils_path)
             
             from objaverse_retriever import ObjaverseRetriever
             
-            # 默认参数
+            # Default parameters
             default_params = {
                 'retrieval_threshold': 25.0,
                 'do_print': False
@@ -193,37 +193,37 @@ def _get_global_objaverse_retrieval(params: Optional[Dict[str, Any]] = None):
 
 def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
     """
-    获取全局AssetRetrievalModule单例
-    线程安全，确保在每个进程中只初始化一次
+    Get global AssetRetrievalModule singleton
+    Thread-safe, ensures initialization only once per process
     
-    参数:
-        params: AssetRetrievalModule初始化参数
+    Args:
+        params: AssetRetrievalModule initialization parameters
     
-    返回:
-        AssetRetrievalModule实例，如果初始化失败则返回None
+    Returns:
+        AssetRetrievalModule instance, or None if initialization fails
     """
     global _GLOBAL_ASSET_RETRIEVAL
     
-    # 快速路径：如果已经初始化，直接返回
+    # Fast path: if already initialized, return directly
     if _GLOBAL_ASSET_RETRIEVAL is not None:
         return _GLOBAL_ASSET_RETRIEVAL
     
-    # 加锁初始化
+    # Lock for initialization
     with _ASSET_RETRIEVAL_LOCK:
-        # 双重检查：可能在等待锁期间已被其他线程初始化
+        # Double-check: may have been initialized by another thread while waiting for lock
         if _GLOBAL_ASSET_RETRIEVAL is not None:
             return _GLOBAL_ASSET_RETRIEVAL
         
         try:
-            # 确保当前目录在sys.path中
+            # Ensure current directory is in sys.path
             utils_path = os.path.dirname(__file__)
             if utils_path not in sys.path:
                 sys.path.append(utils_path)
             
-            # 设置AssetRetrievalModule所需的环境变量
-            project_root = Path(__file__).parent.parent  # llmscene目录
+            # Set environment variables required by AssetRetrievalModule
+            project_root = Path(__file__).parent.parent  # llmscene directory
             
-            # 定义可能的metadata路径
+            # Define possible metadata paths
             metadata_paths = [
                 project_root / "metadata" / "model_info_3dfuture_assets.json",
                 Path("/path/to/SceneReVis/metadata/model_info_3dfuture_assets.json"),
@@ -246,7 +246,7 @@ def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
                 Path("/workspace/code/metadata/model_info_3dfuture_assets_embeds.pickle"),
             ]
             
-            # 查找存在的文件
+            # Find existing files
             metadata_file = None
             for path in metadata_paths:
                 if path.exists():
@@ -265,7 +265,7 @@ def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
                     embed_file = str(path)
                     break
             
-            # 检查是否所有文件都找到
+            # Check if all files are found
             if not metadata_file or not metadata_scaled_file or not embed_file:
                 missing = []
                 if not metadata_file:
@@ -279,15 +279,15 @@ def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
                 print(f"  Searched in: {project_root / 'metadata'}")
                 return None
             
-            # 设置环境变量
+            # Set environment variables
             os.environ['PTH_ASSETS_METADATA'] = metadata_file
             os.environ['PTH_ASSETS_METADATA_SCALED'] = metadata_scaled_file
             os.environ['PTH_ASSETS_EMBED'] = embed_file
             
-            # 导入AssetRetrievalModule
+            # Import AssetRetrievalModule
             from sample import AssetRetrievalModule
             
-            # 默认参数
+            # Default parameters
             default_params = {
                 'lambd': 0.7,
                 'sigma': 0.05,
@@ -299,11 +299,11 @@ def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
                 'do_print': False
             }
             
-            # 合并用户参数
+            # Merge user parameters
             if params:
                 default_params.update(params)
             
-            # 初始化全局单例
+            # Initialize global singleton
             _GLOBAL_ASSET_RETRIEVAL = AssetRetrievalModule(**default_params)
             
             print(f"✓ Global AssetRetrievalModule initialized (thread-safe)")
@@ -320,8 +320,8 @@ def _get_global_asset_retrieval(params: Optional[Dict[str, Any]] = None):
 
 class SceneRenderer:
     """
-    场景渲染器类
-    封装了从JSON场景数据到渲染图像的完整流程
+    Scene Renderer class
+    Encapsulates the complete pipeline from JSON scene data to rendered images
     """
     
     def __init__(self, 
@@ -333,16 +333,16 @@ class SceneRenderer:
                  fast_mode: bool = True,
                  enable_visualization: bool = True):
         """
-        初始化场景渲染器
+        Initialize scene renderer
         
-        参数:
-            asset_path: 3D资产目录路径 (3D-FUTURE-model)
-            use_placeholder: 是否使用占位符渲染（不加载真实3D模型）
-            verbose: 是否输出详细日志
-            temp_dir: 临时文件目录，如果为None则使用系统默认临时目录
-            use_render_lock: 是否使用全局渲染锁（多线程环境推荐启用）
-            fast_mode: 快速渲染模式（512x512, 16采样, 约2-3倍速度提升）
-            enable_visualization: 是否启用3D辅助线可视化（bbox、箭头、坐标网格）
+        Args:
+            asset_path: Path to 3D asset directory (3D-FUTURE-model)
+            use_placeholder: Whether to use placeholder rendering (without loading real 3D models)
+            verbose: Whether to output detailed logs
+            temp_dir: Temporary file directory, uses system default if None
+            use_render_lock: Whether to use global render lock (recommended for multi-threaded environments)
+            fast_mode: Fast rendering mode (512x512, 16 samples, ~2-3x speedup)
+            enable_visualization: Whether to enable 3D helper visualization (bbox, arrows, coordinate grid)
         """
         self.verbose = verbose
         self.use_placeholder = use_placeholder
@@ -351,14 +351,14 @@ class SceneRenderer:
         self.fast_mode = fast_mode
         self.enable_visualization = enable_visualization
         
-        # 设置资产路径
+        # Set up asset path
         self.asset_path = asset_path or self._find_asset_path()
         if self.asset_path:
             os.environ['PTH_3DFUTURE_ASSETS'] = self.asset_path
             if self.verbose:
                 print(f"Using asset path: {self.asset_path}")
         
-        # 设置环境变量
+        # Set environment variables
         os.environ['BPY_VERBOSE'] = '1' if verbose else '0'
         os.environ['BPY_USE_PLACEHOLDER_ONLY'] = '1' if use_placeholder else '0'
         os.environ['BPY_FAST_MODE'] = '1' if fast_mode else '0'
@@ -369,12 +369,12 @@ class SceneRenderer:
         if self.verbose and enable_visualization:
             print("✓ 3D visualization enabled (bbox, arrows, coordinate grid with labels)")
         
-        # 尝试导入渲染函数
+        # Try to import rendering function
         self.render_func = self._import_render_function()
         self.merge_func = self._import_merge_function()
         
     def _find_asset_path(self) -> Optional[str]:
-        """查找3D资产目录，优先使用 PathConfig"""
+        """Find 3D asset directory, prioritizing PathConfig"""
         if os.environ.get('PTH_3DFUTURE_ASSETS'):
             return os.environ['PTH_3DFUTURE_ASSETS']
         
@@ -387,7 +387,7 @@ class SceneRenderer:
         except ImportError:
             pass
         
-        # 尝试常见的资产路径
+        # Try common asset paths
         possible_paths = [
             '/path/to/datasets/3d-front/3D-FUTURE-model',
             '/path/to/datasets/3d-front/3D-FUTURE-model',
@@ -406,14 +406,14 @@ class SceneRenderer:
         return None
     
     def _import_render_function(self):
-        """导入Blender渲染函数"""
+        """Import Blender rendering function"""
         try:
-            # 添加当前目录到sys.path（因为文件已在utils目录中）
+            # Add current directory to sys.path (since file is in utils directory)
             utils_path = os.path.dirname(__file__)
             if utils_path not in sys.path:
                 sys.path.append(utils_path)
             
-            # 导入Blender包装器
+            # Import Blender wrapper
             from blender_wrapper import render_scene_blender_external
             if self.verbose:
                 print("✓ Successfully imported Blender external rendering wrapper")
@@ -424,10 +424,10 @@ class SceneRenderer:
             return None
     
     def _import_merge_function(self):
-        """导入图像合并函数"""
+        """Import image merge function"""
         try:
             import importlib.util
-            # 文件已在utils目录中，直接引用同目录下的image_merger.py
+            # File is in utils directory, directly reference image_merger.py in the same directory
             utils_path = Path(__file__).parent / 'image_merger.py'
             
             spec = importlib.util.spec_from_file_location("image_merger", str(utils_path))
@@ -449,25 +449,25 @@ class SceneRenderer:
                     return_image: bool = False,
                     cleanup_temp: bool = True) -> Union[str, Tuple]:
         """
-        渲染场景并返回图像路径或图像对象（线程安全包装器）
+        Render scene and return image path or image object (thread-safe wrapper)
         
-        参数:
-            scene_data: 场景JSON数据（字典）或JSON文件路径
-            output_path: 输出图像路径，如果为None则自动生成
-            scene_id: 场景ID，用于命名和日志
-            return_image: 是否返回PIL Image对象（而不仅仅是路径）
-            cleanup_temp: 是否清理临时文件
+        Args:
+            scene_data: Scene JSON data (dict) or JSON file path
+            output_path: Output image path, auto-generated if None
+            scene_id: Scene ID, used for naming and logging
+            return_image: Whether to return a PIL Image object (not just the path)
+            cleanup_temp: Whether to clean up temporary files
             
-        返回:
-            如果return_image=False: 返回图像路径(str)
-            如果return_image=True: 返回(图像路径, PIL.Image对象)元组
+        Returns:
+            If return_image=False: Returns image path (str)
+            If return_image=True: Returns (image path, PIL.Image object) tuple
         """
         if self.use_render_lock:
-            # 使用全局锁保护Blender渲染（多线程环境）
+            # Use global lock to protect Blender rendering (multi-threaded environment)
             with _BLENDER_RENDER_LOCK:
                 return self._render_scene_impl(scene_data, output_path, scene_id, return_image, cleanup_temp)
         else:
-            # 不使用锁（单线程环境或调试模式）
+            # No lock (single-threaded environment or debug mode)
             return self._render_scene_impl(scene_data, output_path, scene_id, return_image, cleanup_temp)
     
     def _render_scene_impl(self, 
@@ -477,21 +477,21 @@ class SceneRenderer:
                           return_image: bool = False,
                           cleanup_temp: bool = True) -> Union[str, Tuple]:
         """
-        渲染场景的实际实现（内部方法）
+        Actual implementation of scene rendering (internal method)
         
-        参数:
-            scene_data: 场景JSON数据（字典）或JSON文件路径
-            output_path: 输出图像路径，如果为None则自动生成
-            scene_id: 场景ID，用于命名和日志
-            return_image: 是否返回PIL Image对象（而不仅仅是路径）
-            cleanup_temp: 是否清理临时文件
+        Args:
+            scene_data: Scene JSON data (dict) or JSON file path
+            output_path: Output image path, auto-generated if None
+            scene_id: Scene ID, used for naming and logging
+            return_image: Whether to return a PIL Image object (not just the path)
+            cleanup_temp: Whether to clean up temporary files
             
-        返回:
-            如果return_image=False: 返回图像路径(str)
-            如果return_image=True: 返回(图像路径, PIL.Image对象)元组
+        Returns:
+            If return_image=False: Returns image path (str)
+            If return_image=True: Returns (image path, PIL.Image object) tuple
         """
         try:
-            # 解析场景数据
+            # Parse scene data
             if isinstance(scene_data, (str, Path)):
                 scene_path = Path(scene_data)
                 if not scene_path.exists():
@@ -508,7 +508,7 @@ class SceneRenderer:
                 print(f"Rendering scene: {scene_id}")
                 print(f"{'='*60}")
             
-            # 设置输出路径
+            # Set output path
             if output_path is None:
                 output_path = Path(self.temp_dir) / f"{scene_id}_rendered.png"
             else:
@@ -516,14 +516,14 @@ class SceneRenderer:
             
             output_path.parent.mkdir(parents=True, exist_ok=True)
             
-            # 创建临时渲染目录（多线程环境下确保唯一性）
+            # Create temporary render directory (ensure uniqueness in multi-threaded environment)
             import time
             thread_id = threading.get_ident()
-            timestamp = int(time.time() * 1000000)  # 微秒级时间戳
+            timestamp = int(time.time() * 1000000)  # Microsecond-level timestamp
             temp_render_dir = Path(self.temp_dir) / f"render_{scene_id}_{thread_id}_{timestamp}"
             temp_render_dir.mkdir(parents=True, exist_ok=True)
             
-            # 执行Blender渲染
+            # Execute Blender rendering
             if self.render_func:
                 try:
                     render_result = self.render_func(
@@ -543,20 +543,20 @@ class SceneRenderer:
             else:
                 render_result = None
             
-            # 查找生成的图片文件
+            # Find generated image files
             top_file = temp_render_dir / "top" / "frame.png"
             diag_file = temp_render_dir / "diag" / "frame.png"
             
-            # 合并图像或创建占位符
+            # Merge images or create placeholder
             if top_file.exists() and diag_file.exists() and self.merge_func:
                 try:
-                    # 合并俯视图和斜视图
+                    # Merge top-down view and diagonal view
                     self.merge_func(str(top_file), str(diag_file), str(output_path))
                     
                     if self.verbose:
                         print(f"✓ Rendered and merged image saved to: {output_path}")
                     
-                    # 清理临时文件
+                    # Clean up temporary files
                     if cleanup_temp:
                         try:
                             shutil.rmtree(temp_render_dir)
@@ -568,15 +568,15 @@ class SceneRenderer:
                     if self.verbose:
                         print(f"Warning: Image merge failed: {merge_error}")
                         traceback.print_exc()
-                    # 继续到占位符创建
+                    # Continue to placeholder creation
                     output_path = self._create_placeholder_image(scene_dict, output_path, scene_id)
             else:
-                # 创建占位符图像
+                # Create placeholder image
                 if self.verbose:
                     print("Warning: Rendered images not found, creating placeholder")
                 output_path = self._create_placeholder_image(scene_dict, output_path, scene_id)
             
-            # 返回结果
+            # Return results
             output_path_str = str(output_path)
             
             if return_image:
@@ -595,7 +595,7 @@ class SceneRenderer:
                 print(f"Error in render_scene: {e}")
                 traceback.print_exc()
             
-            # 返回占位符
+            # Return placeholder
             fallback_path = self._create_placeholder_image(
                 scene_dict if 'scene_dict' in locals() else {},
                 output_path if output_path else Path(self.temp_dir) / f"{scene_id}_error.png",
@@ -614,18 +614,18 @@ class SceneRenderer:
                                   scene_dict: Dict[str, Any], 
                                   output_path: Path,
                                   scene_id: str) -> Path:
-        """创建占位符图像"""
+        """Create placeholder image"""
         try:
             if not PIL_AVAILABLE:
                 if self.verbose:
                     print("Error: PIL not available, cannot create placeholder")
                 return output_path
             
-            # 创建占位符图片
+            # Create placeholder image
             img = Image.new('RGB', (1024, 512), color='lightgray')
             draw = ImageDraw.Draw(img)
             
-            # 计算对象数量
+            # Count objects
             objects_count = 0
             if 'groups' in scene_dict:
                 objects_count = sum(len(group.get('objects', [])) 
@@ -633,17 +633,17 @@ class SceneRenderer:
             elif 'objects' in scene_dict:
                 objects_count = len(scene_dict.get('objects', []))
             
-            # 获取房间类型
+            # Get room type
             room_type = scene_dict.get('room_type', 'Unknown')
             
-            # 尝试加载字体
+            # Try to load font
             font = None
             try:
                 font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
             except:
                 pass
             
-            # 绘制信息
+            # Draw information
             text_lines = [
                 f"Scene: {scene_id}",
                 f"Room Type: {room_type}",
@@ -661,7 +661,7 @@ class SceneRenderer:
                 draw.text((x, y_offset), line, fill='black', font=font)
                 y_offset += 35
             
-            # 保存占位符图片
+            # Save placeholder image
             output_path.parent.mkdir(parents=True, exist_ok=True)
             img.save(output_path)
             
@@ -677,35 +677,35 @@ class SceneRenderer:
             return output_path
 
 
-# 便捷函数：快速渲染场景
+# Convenience function: quickly render a scene
 def render_scene_quick(scene_data: Union[Dict, str, Path],
                       output_path: Optional[str] = None,
                       return_image: bool = False,
                       verbose: bool = False,
                       fast_mode: bool = True) -> Union[str, Tuple]:
     """
-    快速渲染场景的便捷函数
+    Convenience function for quick scene rendering
     
-    参数:
-        scene_data: 场景JSON数据（字典）或JSON文件路径
-        output_path: 输出图像路径，如果为None则自动生成
-        return_image: 是否返回PIL Image对象
-        verbose: 是否输出详细日志
-        fast_mode: 快速渲染模式（512x512, 16采样, 约2-3倍速度提升）
+    Args:
+        scene_data: Scene JSON data (dict) or JSON file path
+        output_path: Output image path, auto-generated if None
+        return_image: Whether to return a PIL Image object
+        verbose: Whether to output detailed logs
+        fast_mode: Fast rendering mode (512x512, 16 samples, ~2-3x speedup)
         
-    返回:
-        如果return_image=False: 返回图像路径(str)
-        如果return_image=True: 返回(图像路径, PIL.Image对象)元组
+    Returns:
+        If return_image=False: Returns image path (str)
+        If return_image=True: Returns (image path, PIL.Image object) tuple
         
-    示例:
-        >>> # 渲染JSON文件（快速模式）
+    Examples:
+        >>> # Render JSON file (fast mode)
         >>> img_path = render_scene_quick("./scene.json")
         >>> 
-        >>> # 渲染JSON字典并获取图像对象
+        >>> # Render JSON dict and get image object
         >>> scene_dict = {...}
         >>> img_path, img = render_scene_quick(scene_dict, return_image=True)
         >>> 
-        >>> # 高质量模式
+        >>> # High quality mode
         >>> img_path = render_scene_quick(scene_dict, output_path="./my_scene.png", fast_mode=False)
     """
     renderer = SceneRenderer(verbose=verbose, fast_mode=fast_mode)
@@ -716,26 +716,26 @@ def render_scene_quick(scene_data: Union[Dict, str, Path],
     )
 
 
-# 便捷函数：批量渲染多个场景
+# Convenience function: batch render multiple scenes
 def render_scenes_batch(scene_data_list: list,
                        output_dir: Union[str, Path],
                        scene_ids: Optional[list] = None,
                        return_images: bool = False,
                        verbose: bool = False) -> list:
     """
-    批量渲染多个场景
+    Batch render multiple scenes
     
-    参数:
-        scene_data_list: 场景数据列表（每个元素是字典或文件路径）
-        output_dir: 输出目录
-        scene_ids: 场景ID列表，如果为None则自动生成
-        return_images: 是否返回图像对象
-        verbose: 是否输出详细日志
+    Args:
+        scene_data_list: List of scene data (each element is a dict or file path)
+        output_dir: Output directory
+        scene_ids: List of scene IDs, auto-generated if None
+        return_images: Whether to return image objects
+        verbose: Whether to output detailed logs
         
-    返回:
-        渲染结果列表，每个元素是图像路径或(路径, 图像)元组
+    Returns:
+        List of render results, each element is an image path or (path, image) tuple
         
-    示例:
+    Examples:
         >>> scenes = [scene1_dict, scene2_dict, scene3_dict]
         >>> results = render_scenes_batch(scenes, "./output")
         >>> for img_path in results:
@@ -744,10 +744,10 @@ def render_scenes_batch(scene_data_list: list,
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # 创建渲染器
+    # Create renderer
     renderer = SceneRenderer(verbose=verbose)
     
-    # 生成场景ID
+    # Generate scene IDs
     if scene_ids is None:
         scene_ids = [f"scene_{i:03d}" for i in range(len(scene_data_list))]
     
@@ -777,25 +777,25 @@ def render_scenes_batch(scene_data_list: list,
     return results
 
 
-# 便捷函数：从文件加载并渲染
+# Convenience function: load from file and render
 def render_scene_from_file(json_file_path: Union[str, Path],
                           output_path: Optional[Union[str, Path]] = None,
                           return_image: bool = False,
                           verbose: bool = False) -> Union[str, Tuple]:
     """
-    从JSON文件加载场景并渲染
+    Load scene from JSON file and render
     
-    参数:
-        json_file_path: 场景JSON文件路径
-        output_path: 输出图像路径，如果为None则使用与JSON文件相同的目录
-        return_image: 是否返回PIL Image对象
-        verbose: 是否输出详细日志
+    Args:
+        json_file_path: Path to scene JSON file
+        output_path: Output image path; if None, uses the same directory as the JSON file
+        return_image: Whether to return a PIL Image object
+        verbose: Whether to output detailed logs
         
-    返回:
-        如果return_image=False: 返回图像路径(str)
-        如果return_image=True: 返回(图像路径, PIL.Image对象)元组
+    Returns:
+        If return_image=False: returns the image path (str)
+        If return_image=True: returns a (image_path, PIL.Image) tuple
         
-    示例:
+    Examples:
         >>> img_path = render_scene_from_file("./scenes/livingroom.json")
         >>> img_path, img = render_scene_from_file("./scenes/bedroom.json", return_image=True)
     """
@@ -804,7 +804,7 @@ def render_scene_from_file(json_file_path: Union[str, Path],
     if not json_path.exists():
         raise FileNotFoundError(f"Scene file not found: {json_path}")
     
-    # 如果没有指定输出路径，使用与JSON文件相同的目录
+    # If no output path specified, use same directory as JSON file
     if output_path is None:
         output_path = json_path.parent / f"{json_path.stem}_rendered.png"
     
@@ -818,7 +818,7 @@ def render_scene_from_file(json_file_path: Union[str, Path],
 
 if __name__ == "__main__":
     """
-    测试和示例代码
+    Test and example code
     """
     import argparse
     
@@ -839,7 +839,7 @@ if __name__ == "__main__":
     if args.test:
         print("Running test with sample scene...")
         
-        # 创建示例场景
+        # Create sample scene
         test_scene = {
             "room_type": "livingroom",
             "room_id": "test_room",
@@ -887,7 +887,7 @@ if __name__ == "__main__":
         print(json.dumps(test_scene, indent=2))
         print("="*60)
         
-        # 渲染测试场景
+        # Render test scene
         result = render_scene_quick(
             scene_data=test_scene,
             output_path=args.output or "./test_render_output.png",
@@ -907,7 +907,7 @@ if __name__ == "__main__":
             print(f"  Image path: {result}")
     
     else:
-        # 渲染指定的场景文件
+        # Render the specified scene file
         print(f"Rendering scene: {args.scene}")
         
         renderer = SceneRenderer(
@@ -933,17 +933,17 @@ if __name__ == "__main__":
 
 
 # ============================================================================
-# 场景编辑功能
+# Scene Editing Features
 # ============================================================================
 
 class SceneEditor:
     """
-    场景编辑器类
-    封装了场景编辑和资产检索的完整流程
+    Scene Editor Class
+    Encapsulates the complete pipeline for scene editing and asset retrieval
     
-    支持两种资产来源：
-    - 3D-FUTURE: 默认，使用 AssetRetrievalModule
-    - Objaverse: 使用 ObjaverseRetriever，需设置 use_objaverse=True
+    Supports two asset sources:
+    - 3D-FUTURE: Default, uses AssetRetrievalModule
+    - Objaverse: Uses ObjaverseRetriever, requires use_objaverse=True
     """
     
     def __init__(self, 
@@ -951,35 +951,35 @@ class SceneEditor:
                  use_objaverse: bool = True,
                  verbose: bool = False):
         """
-        初始化场景编辑器
+        Initialize scene editor
         
-        参数:
-            asset_retrieval_params: 资产检索模块参数，如果为None则使用默认参数
-            use_objaverse: 是否使用 Objaverse 资产检索（默认 False，使用 3D-FUTURE）
-            verbose: 是否输出详细日志
+        Args:
+            asset_retrieval_params: Asset retrieval module parameters, uses defaults if None
+            use_objaverse: Whether to use Objaverse asset retrieval (default False, uses 3D-FUTURE)
+            verbose: Whether to output detailed logs
         """
         self.verbose = verbose
         self.use_objaverse = use_objaverse
         
-        # 导入场景编辑器模块
+        # Import scene editor module
         self._import_scene_editor()
         
-        # 根据 use_objaverse 选择资产检索模块
+        # Select asset retrieval module based on use_objaverse
         if use_objaverse:
-            # 使用 Objaverse 检索器
+            # Use Objaverse retriever
             self.asset_retrieval_module = _get_global_objaverse_retrieval(asset_retrieval_params)
             if self.verbose and self.asset_retrieval_module:
                 print("✓ Using ObjaverseRetriever for asset retrieval")
         else:
-            # 使用 3D-FUTURE 检索器（默认）
+            # Use 3D-FUTURE retriever (default)
             self.asset_retrieval_module = _get_global_asset_retrieval(asset_retrieval_params)
             if self.verbose and self.asset_retrieval_module:
                 print("✓ Using AssetRetrievalModule (3D-FUTURE) for asset retrieval")
     
     def _import_scene_editor(self):
-        """导入场景编辑器模块"""
+        """Import scene editor module"""
         try:
-            # 添加当前目录到sys.path（因为文件已在utils目录中）
+            # Add current directory to sys.path (since file is in utils directory)
             utils_path = os.path.dirname(__file__)
             if utils_path not in sys.path:
                 sys.path.append(utils_path)
@@ -1000,18 +1000,18 @@ class SceneEditor:
                   retrieve_assets: bool = True,
                   output_path: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
         """
-        编辑场景：应用tool_calls并进行资产检索
+        Edit scene: apply tool_calls and perform asset retrieval
         
-        参数:
-            scene_data: 初始场景数据（字典）或JSON文件路径
-            tool_calls: 工具调用列表，每个调用包含name和arguments
-            retrieve_assets: 是否进行资产检索
-            output_path: 输出场景JSON文件路径（可选）
+        Args:
+            scene_data: Initial scene data (dict) or JSON file path
+            tool_calls: List of tool calls, each containing name and arguments
+            retrieve_assets: Whether to perform asset retrieval
+            output_path: Output scene JSON file path (optional)
             
-        返回:
-            编辑后的场景数据
+        Returns:
+            Edited scene data
             
-        示例:
+        Examples:
             >>> editor = SceneEditor()
             >>> tool_calls = [
             ...     {
@@ -1028,7 +1028,7 @@ class SceneEditor:
             >>> new_scene = editor.edit_scene(initial_scene, tool_calls)
         """
         try:
-            # 解析场景数据
+            # Parse scene data
             if isinstance(scene_data, (str, Path)):
                 scene_path = Path(scene_data)
                 if not scene_path.exists():
@@ -1045,7 +1045,7 @@ class SceneEditor:
                 print(f"Scene Editing with {len(tool_calls)} tool calls")
                 print(f"{'='*60}")
             
-            # 1. 应用工具调用
+            # 1. Apply tool calls
             if self.apply_tool_calls and tool_calls:
                 if self.verbose:
                     print(f"\nApplying {len(tool_calls)} tool calls...")
@@ -1060,7 +1060,7 @@ class SceneEditor:
                         print("Warning: scene_editor not available, skipping tool calls")
                 edited_scene = scene_dict
             
-            # 2. 资产检索
+            # 2. Asset retrieval
             if retrieve_assets and self.asset_retrieval_module:
                 if self.verbose:
                     print(f"\nPerforming asset retrieval...")
@@ -1084,7 +1084,7 @@ class SceneEditor:
                         print("Warning: Asset retrieval module not available")
                 final_scene = edited_scene
             
-            # 3. 保存到文件（如果指定了输出路径）
+            # 3. Save to file (if output path is specified)
             if output_path:
                 output_file = Path(output_path)
                 output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1109,7 +1109,7 @@ class SceneEditor:
             raise
 
 
-# 便捷函数：快速编辑场景
+# Convenience function: quickly edit a scene
 def edit_scene_quick(scene_data: Union[Dict, str, Path],
                     tool_calls: list,
                     retrieve_assets: bool = True,
@@ -1117,20 +1117,20 @@ def edit_scene_quick(scene_data: Union[Dict, str, Path],
                     output_path: Optional[str] = None,
                     verbose: bool = False) -> Dict[str, Any]:
     """
-    快速编辑场景的便捷函数
+    Convenience function for quick scene editing
     
-    参数:
-        scene_data: 场景数据（字典）或JSON文件路径
-        tool_calls: 工具调用列表
-        retrieve_assets: 是否进行资产检索
-        use_objaverse: 是否使用 Objaverse 资产检索（默认 False，使用 3D-FUTURE）
-        output_path: 输出JSON文件路径（可选）
-        verbose: 是否输出详细日志
+    Args:
+        scene_data: Scene data (dict) or JSON file path
+        tool_calls: List of tool calls
+        retrieve_assets: Whether to perform asset retrieval
+        use_objaverse: Whether to use Objaverse asset retrieval (default False, uses 3D-FUTURE)
+        output_path: Output JSON file path (optional)
+        verbose: Whether to output detailed logs
         
-    返回:
-        编辑后的场景数据
+    Returns:
+        Edited scene data
         
-    示例:
+    Examples:
         >>> tool_calls = [
         ...     {"name": "add_object", "arguments": {...}},
         ...     {"name": "move_object", "arguments": {...}}
@@ -1146,7 +1146,7 @@ def edit_scene_quick(scene_data: Union[Dict, str, Path],
     )
 
 
-# 便捷函数：编辑并渲染场景
+# Convenience function: edit and render scene
 def edit_and_render_scene(scene_data: Union[Dict, str, Path],
                          tool_calls: list,
                          output_dir: Union[str, Path],
@@ -1158,40 +1158,40 @@ def edit_and_render_scene(scene_data: Union[Dict, str, Path],
                          fast_mode: bool = True) -> Union[Tuple[Dict[str, Any], str, bool], 
                                                          Tuple[Dict[str, Any], str, Optional[Image.Image], bool]]:
     """
-    编辑场景并渲染为图像（线程安全模式）
+    Edit scene and render to image (thread-safe mode)
     
-    线程安全保证：
-    - AssetRetrievalModule使用全局单例（进程内唯一CLIP模型实例）
-    - Blender渲染使用全局锁（串行化子进程调用）
-    - 临时目录使用thread_id + timestamp确保唯一性
+    Thread safety guarantees:
+    - AssetRetrievalModule uses global singleton (single CLIP model instance per process)
+    - Blender rendering uses global lock (serialized subprocess calls)
+    - Temporary directories use thread_id + timestamp to ensure uniqueness
     
-    参数:
-        scene_data: 初始场景数据
-        tool_calls: 工具调用列表
-        output_dir: 输出目录
-        scene_id: 场景ID
-        retrieve_assets: 是否进行资产检索
-        use_objaverse: 是否使用 Objaverse 资产检索（默认 False，使用 3D-FUTURE）
-        return_image: 是否返回PIL Image对象
-        verbose: 是否输出详细日志
-        fast_mode: 快速渲染模式（512x512, 16采样, 约2-3倍速度提升）
+    Args:
+        scene_data: Initial scene data
+        tool_calls: List of tool calls
+        output_dir: Output directory
+        scene_id: Scene ID
+        retrieve_assets: Whether to perform asset retrieval
+        use_objaverse: Whether to use Objaverse asset retrieval (default False, uses 3D-FUTURE)
+        return_image: Whether to return a PIL Image object
+        verbose: Whether to output detailed logs
+        fast_mode: Fast rendering mode (512x512, 16 samples, ~2-3x speedup)
         
-    返回:
-        如果return_image=False: (编辑后的场景数据, 渲染图像路径, 是否终止) 元组
-        如果return_image=True: (编辑后的场景数据, 渲染图像路径, PIL.Image对象, 是否终止) 元组
-        其中 is_terminated 为 True 表示 tool_calls 中包含 "terminate" 调用
+    Returns:
+        If return_image=False: (edited scene data, render image path, is_terminated) tuple
+        If return_image=True: (edited scene data, render image path, PIL.Image object, is_terminated) tuple
+        where is_terminated is True if tool_calls contain a "terminate" call
         
-    示例:
+    Examples:
         >>> tool_calls = [{"name": "add_object", "arguments": {...}}]
-        >>> # 只返回路径（快速模式）
+        >>> # Return path only (fast mode)
         >>> new_scene, img_path, is_terminated = edit_and_render_scene(
         ...     scene_dict, tool_calls, "./output", fast_mode=True
         ... )
-        >>> # 使用 Objaverse 资产
+        >>> # Use Objaverse assets
         >>> new_scene, img_path, is_terminated = edit_and_render_scene(
         ...     scene_dict, tool_calls, "./output", use_objaverse=True
         ... )
-        >>> # 返回路径和图像对象
+        >>> # Return path and image object
         >>> new_scene, img_path, img, is_terminated = edit_and_render_scene(
         ...     scene_dict, tool_calls, "./output", return_image=True
         ... )
@@ -1199,10 +1199,10 @@ def edit_and_render_scene(scene_data: Union[Dict, str, Path],
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # 检查是否有 terminate 调用
+    # Check if there is a terminate call
     is_terminated = any(call.get('name') == 'terminate' for call in tool_calls)
     
-    # 1. 编辑场景
+    # 1. Edit scene
     if verbose:
         print(f"\n{'='*60}")
         print(f"Edit and Render: {scene_id}")
@@ -1218,7 +1218,7 @@ def edit_and_render_scene(scene_data: Union[Dict, str, Path],
         output_path=output_path / f"{scene_id}.json"
     )
     
-    # 2. 渲染场景（使用快速模式并启用3D可视化）
+    # 2. Render scene (using fast mode with 3D visualization enabled)
     renderer = SceneRenderer(verbose=verbose, use_render_lock=False, fast_mode=fast_mode, enable_visualization=True)
     render_result = renderer.render_scene(
         scene_data=edited_scene,
@@ -1255,26 +1255,26 @@ def edit_and_render_scene(scene_data: Union[Dict, str, Path],
 
 def _find_objaverse_glb(uid: str) -> Optional[Path]:
     """
-    查找 Objaverse GLB 文件路径。
+    Find the path to an Objaverse GLB file.
     
-    优先使用 PathConfig 统一配置，然后按以下顺序搜索:
-    1. PathConfig 配置的缓存目录
-    2. OBJAVERSE_GLB_CACHE_DIR 环境变量指定的路径
-    3. /path/to/datasets/objathor-assets/glbs (云存储)
-    4. ~/.objaverse/hf-objaverse-v1/glbs (本地缓存)
+    Prioritizes PathConfig unified configuration, then searches in the following order:
+    1. Cache directory configured by PathConfig
+    2. Path specified by OBJAVERSE_GLB_CACHE_DIR environment variable
+    3. /path/to/datasets/objathor-assets/glbs (cloud storage)
+    4. ~/.objaverse/hf-objaverse-v1/glbs (local cache)
     
     Args:
-        uid: Objaverse 资产 UID
+        uid: Objaverse asset UID
         
     Returns:
-        GLB 文件路径，如果未找到则返回 None
+        GLB file path, or None if not found
     """
     import os
     
     if not uid or len(uid) < 2:
         return None
     
-    # GLB 缓存目录列表（按优先级排序）
+    # GLB cache directories list (sorted by priority)
     cache_dirs = []
     
     # Try PathConfig first
@@ -1286,25 +1286,25 @@ def _find_objaverse_glb(uid: str) -> Optional[Path]:
     except ImportError:
         pass
     
-    # 添加环境变量指定的路径
+    # Add path specified by environment variable
     env_cache = os.environ.get("OBJAVERSE_GLB_CACHE_DIR")
     if env_cache:
         cache_dirs.append(Path(env_cache) / "glbs")
     
-    # 添加云存储路径
+    # Add cloud storage path
     cache_dirs.append(Path("/path/to/datasets/objathor-assets/glbs"))
     
-    # 添加本地缓存
+    # Add local cache
     cache_dirs.append(Path.home() / ".objaverse" / "hf-objaverse-v1" / "glbs")
     
-    # 使用 uid[:2] 直接构建路径（优化：避免遍历所有子目录）
+    # Use uid[:2] to directly build the path (optimization: avoid traversing all subdirectories)
     subdir_name = uid[:2]
     
     for cache_dir in cache_dirs:
         if not cache_dir.is_dir():
             continue
         
-        # 直接查找 uid[:2] 子目录下的 GLB 文件
+        # Directly find GLB file in uid[:2] subdirectory
         candidate = cache_dir / subdir_name / f"{uid}.glb"
         if candidate.is_file():
             return candidate
@@ -1314,8 +1314,9 @@ def _find_objaverse_glb(uid: str) -> Optional[Path]:
 
 class VoxelReward:
     """
-    基于体素评估的奖励计算类
-    使用体素化方法评估场景的物理合理性（出界和碰撞），并计算强化学习奖励
+    Voxel-based reward computation class
+    Uses voxelization to evaluate scene physical plausibility (out-of-bounds and collisions),
+    and computes reinforcement learning rewards
     """
     
     def __init__(self, 
@@ -1324,13 +1325,13 @@ class VoxelReward:
                  reward_threshold: float = 1e-5,
                  verbose: bool = False):
         """
-        初始化体素奖励计算器
+        Initialize voxel reward calculator
         
-        参数:
-            models_base_path: 3D模型文件基础路径 (3D-FUTURE-model目录)
-            voxel_size: 体素大小，单位为米 (默认0.05m = 5cm)
-            reward_threshold: PBL损失阈值，低于此值给予正奖励 (默认1e-5)
-            verbose: 是否输出详细日志
+        Args:
+            models_base_path: Base path for 3D model files (3D-FUTURE-model directory)
+            voxel_size: Voxel size in meters (default 0.05m = 5cm)
+            reward_threshold: PBL loss threshold, positive reward given below this value (default 1e-5)
+            verbose: Whether to output detailed logs
         """
         if not VOXEL_EVAL_AVAILABLE:
             raise ImportError(
@@ -1354,13 +1355,13 @@ class VoxelReward:
     
     def _parse_scene_data(self, scene_json: Dict, format_type: str = 'ours'):
         """
-        解析场景JSON数据，支持两种格式
+        Parse scene JSON data, supports two formats
         
-        参数:
-            scene_json: 场景JSON数据
-            format_type: 'ours' 或 'respace'
+        Args:
+            scene_json: Scene JSON data
+            format_type: 'ours' or 'respace'
         
-        返回:
+        Returns:
             bounds_bottom, bounds_top, all_objects
         """
         if format_type == 'respace':
@@ -1368,9 +1369,9 @@ class VoxelReward:
             bounds_top = scene_json.get('bounds_top', [])
             all_objects = scene_json.get('objects', [])
         else:
-            # ours格式：使用room_envelope和groups结构
+            # ours format: uses room_envelope and groups structure
             if 'room_envelope' not in scene_json:
-                raise ValueError("场景JSON缺少'room_envelope'字段")
+                raise ValueError("Scene JSON missing 'room_envelope' field")
             
             bounds_bottom = scene_json['room_envelope']['bounds_bottom']
             bounds_top = scene_json['room_envelope']['bounds_top']
@@ -1383,28 +1384,28 @@ class VoxelReward:
         return bounds_bottom, bounds_top, all_objects
     
     def _create_floor_plan_polygon(self, bounds_bottom):
-        """从房间底部边界创建地板多边形"""
+        """Create floor polygon from room bottom boundary"""
         points = [(pt[0], pt[2]) for pt in bounds_bottom]
         return Polygon(points)
     
     def _create_room_mesh(self, bounds_bottom, bounds_top, floor_plan_polygon):
-        """创建房间mesh"""
+        """Create room mesh"""
         num_verts = len(bounds_bottom)
         all_vertices = np.array(bounds_bottom + bounds_top)
         
-        # 使用trimesh创建地板三角形
+        # Use trimesh to create floor triangles
         vtx, floor_faces = trimesh.creation.triangulate_polygon(floor_plan_polygon, engine="triangle")
-        # 移除无效面
+        # Remove invalid faces
         idxs = []
         for i, row in enumerate(floor_faces):
             if np.any(row == num_verts):
                 idxs.append(i)
         floor_faces = np.delete(floor_faces, idxs, axis=0)
         
-        # 创建天花板面
+        # Create ceiling faces
         ceiling_faces = floor_faces + num_verts
         
-        # 创建侧面
+        # Create side faces
         side_faces = []
         for i in range(num_verts):
             next_i = (i + 1) % num_verts
@@ -1420,20 +1421,20 @@ class VoxelReward:
     
     def _prepare_asset_voxel(self, obj, voxel_size):
         """
-        准备对象的体素表示
-        关键：先旋转mesh，再体素化，使用中心底部作为锚点
+        Prepare voxel representation of an object
+        Key: rotate mesh first, then voxelize, using center-bottom as anchor
         
-        支持两种资产来源:
-        - 3D-FUTURE: 使用 'jid' 字段，从 models_base_path/{jid}/raw_model.glb 加载
-        - Objaverse: 使用 'uid' 字段，从 GLB 缓存加载
+        Supports two asset sources:
+        - 3D-FUTURE: Uses 'jid' field, loads from models_base_path/{jid}/raw_model.glb
+        - Objaverse: Uses 'uid' field, loads from GLB cache
         """
-        # 确定资产来源和模型路径
+        # Determine asset source and model path
         asset_source = obj.get('asset_source', '3d-future')
         model_path = None
         asset_id = None
         
         if asset_source == 'objaverse':
-            # Objaverse 资产：使用 uid 和 GLB 缓存
+            # Objaverse asset: use uid and GLB cache
             uid = obj.get('uid')
             if uid:
                 asset_id = uid
@@ -1441,7 +1442,7 @@ class VoxelReward:
                 if model_path and self.verbose:
                     print(f"Found Objaverse GLB for {uid[:16]}...: {model_path}")
         else:
-            # 3D-FUTURE 资产：使用 jid
+            # 3D-FUTURE asset: use jid
             jid = obj.get('jid', 'N/A')
             asset_id = jid
             model_path = self.models_base_path / jid / 'raw_model.glb'
@@ -1449,7 +1450,7 @@ class VoxelReward:
                 model_path = None
         
         if model_path is None or not model_path.exists():
-            # 使用边界框创建替代mesh
+            # Use bounding box as placeholder mesh
             if self.verbose:
                 print(f"Model not found for {asset_id}, using box placeholder")
             mesh = trimesh.creation.box(extents=obj['size'])
@@ -1462,59 +1463,59 @@ class VoxelReward:
                     mesh = asset_scene
             except Exception as e:
                 if self.verbose:
-                    print(f"加载mesh失败 {asset_id}: {e}")
+                    print(f"Failed to load mesh {asset_id}: {e}")
                 mesh = trimesh.creation.box(extents=obj['size'])
         
-        # ==== Objaverse 坐标系校正 ====
-        # Objaverse GLB 模型需要重置初始旋转（与 blender_renderer.py 保持一致）
-        # 这确保物理计算与渲染结果一致
+        # ==== Objaverse coordinate system correction ====
+        # Objaverse GLB models need initial rotation reset (consistent with blender_renderer.py)
+        # This ensures physics calculations match rendering results
         if asset_source == 'objaverse' and model_path is not None:
-            # Objaverse 模型：重置到标准朝向（无需额外旋转校正）
-            # 渲染时使用 rotation_euler = (0, 0, 0)，这里保持 mesh 原样即可
-            # 因为 trimesh 加载的 GLB 已经是正确朝向
+            # Objaverse model: reset to standard orientation (no extra rotation correction needed)
+            # Rendering uses rotation_euler = (0, 0, 0), so keep mesh as-is
+            # Because trimesh-loaded GLB is already in the correct orientation
             if self.verbose:
                 print(f"Objaverse asset {asset_id}: using standard orientation (no correction needed)")
         
-        # 1. 应用缩放到目标尺寸
+        # 1. Apply scaling to target size
         original_size = mesh.extents
         target_size = obj['size']
         scale_factors = target_size / (original_size + 1e-6)
         mesh.apply_scale(scale_factors)
         
-        # 2. 应用旋转（不包括平移）
+        # 2. Apply rotation (without translation)
         rot_xyzw = obj['rot']
         rotation = R.from_quat(rot_xyzw)
         rotation_matrix = np.eye(4)
         rotation_matrix[:3, :3] = rotation.as_matrix()
         mesh.apply_transform(rotation_matrix)
         
-        # 3. 体素化旋转后的mesh
+        # 3. Voxelize the rotated mesh
         try:
             asset_voxels = mesh.voxelized(pitch=voxel_size).fill()
             asset_voxel_matrix = asset_voxels.matrix
         except Exception as e:
             if self.verbose:
-                print(f"体素化失败 {obj.get('desc', 'Unknown')}: {e}")
+                print(f"Voxelization failed for {obj.get('desc', 'Unknown')}: {e}")
             return None, None, mesh
         
-        # 4. 计算体素空间的位置偏移
+        # 4. Compute position offset in voxel space
         pos = obj['pos']
         asset_pos_voxels = np.floor(np.array(pos) / voxel_size)
         
-        # 物体体素矩阵的锚点：X轴中心，Y轴底部，Z轴中心
+        # Anchor point of object voxel matrix: X-axis center, Y-axis bottom, Z-axis center
         asset_start_voxels = np.array([
             asset_voxel_matrix.shape[0] // 2,
             0,
             asset_voxel_matrix.shape[2] // 2
         ])
         
-        # 计算从原点的偏移
+        # Compute offset from origin
         asset_shift_from_origin = asset_pos_voxels - asset_start_voxels
         
         return asset_voxel_matrix, asset_shift_from_origin, mesh
     
     def _occupancy_overlap(self, voxel_matrix_a, voxel_matrix_b, offset_b):
-        """计算两个体素矩阵的重叠"""
+        """Compute overlap between two voxel matrices"""
         overlap_matrix = copy.deepcopy(voxel_matrix_a).astype(int)
         
         for i in range(voxel_matrix_b.shape[0]):
@@ -1530,7 +1531,7 @@ class VoxelReward:
         return (overlap_matrix == 2)
     
     def _compute_voxel_oob(self, obj, room_origin_shift, room_voxel_matrix, voxel_volume):
-        """计算基于体素的出界体积"""
+        """Compute voxel-based out-of-bounds volume"""
         asset_voxel_matrix, asset_shift_from_origin, mesh = self._prepare_asset_voxel(obj, self.voxel_size)
         
         if asset_voxel_matrix is None:
@@ -1549,7 +1550,7 @@ class VoxelReward:
         return max(0.0, voxel_oob)
     
     def _compute_voxel_collision(self, obj_x, obj_y, voxel_volume):
-        """计算基于体素的碰撞体积"""
+        """Compute voxel-based collision volume"""
         asset_voxel_matrix_x, asset_shift_x, mesh_x = self._prepare_asset_voxel(obj_x, self.voxel_size)
         asset_voxel_matrix_y, asset_shift_y, mesh_y = self._prepare_asset_voxel(obj_y, self.voxel_size)
         
@@ -1568,29 +1569,29 @@ class VoxelReward:
                       scene_data: Union[Dict, str, Path],
                       format_type: str = 'ours') -> Dict[str, Any]:
         """
-        评估场景的物理合理性
+        Evaluate the physical plausibility of a scene
         
-        参数:
-            scene_data: 场景数据，可以是字典、JSON文件路径或Path对象
-            format_type: 场景格式类型，'ours' 或 'respace'
+        Args:
+            scene_data: Scene data, can be a dict, JSON file path, or Path object
+            format_type: Scene format type, 'ours' or 'respace'
         
-        返回:
-            包含评估指标的字典，包含：
-            - total_oob_loss: 总出界体积损失
-            - total_mbl_loss: 总碰撞体积损失 (Mesh-Based Loss)
-            - total_pbl_loss: 总物理损失 (Physics-Based Loss = OOB + MBL)
-            - num_oob_objects: 出界物体数量
-            - num_collision_pairs: 碰撞物体对数量
-            - voxel_size: 使用的体素大小
+        Returns:
+            Dictionary containing evaluation metrics:
+            - total_oob_loss: Total out-of-bounds volume loss
+            - total_mbl_loss: Total collision volume loss (Mesh-Based Loss)
+            - total_pbl_loss: Total physics loss (Physics-Based Loss = OOB + MBL)
+            - num_oob_objects: Number of out-of-bounds objects
+            - num_collision_pairs: Number of colliding object pairs
+            - voxel_size: Voxel size used
         """
-        # 加载场景数据
+        # Load scene data
         if isinstance(scene_data, (str, Path)):
             with open(scene_data, 'r', encoding='utf-8') as f:
                 scene_json = json.load(f)
         else:
             scene_json = scene_data
         
-        # 提取场景数据
+        # Extract scene data
         bounds_bottom, bounds_top, all_objects = self._parse_scene_data(scene_json, format_type)
         
         if len(all_objects) == 0:
@@ -1605,7 +1606,7 @@ class VoxelReward:
         
         floor_plan_polygon = self._create_floor_plan_polygon(bounds_bottom)
         
-        # 创建房间mesh并体素化
+        # Create room mesh and voxelize
         room_mesh = self._create_room_mesh(bounds_bottom, bounds_top, floor_plan_polygon)
         room_voxels = room_mesh.voxelized(pitch=self.voxel_size).fill()
         room_voxel_matrix = room_voxels.matrix
@@ -1614,21 +1615,21 @@ class VoxelReward:
         
         voxel_volume = self.voxel_size ** 3
         
-        # 计算指标
+        # Compute metrics
         voxel_oobs = []
         voxel_collisions = []
         
         for i, obj in enumerate(all_objects):
-            # 体素出界
+            # Voxel out-of-bounds
             voxel_oob = self._compute_voxel_oob(obj, room_origin_shift, room_voxel_matrix, voxel_volume)
             voxel_oobs.append(voxel_oob)
             
-            # 与其他对象的碰撞
+            # Collisions with other objects
             for j, other_obj in enumerate(all_objects[i+1:], i+1):
                 voxel_collision = self._compute_voxel_collision(obj, other_obj, voxel_volume)
                 voxel_collisions.append(voxel_collision)
         
-        # 汇总指标
+        # Aggregate metrics
         total_oob_loss = sum(voxel_oobs)
         total_mbl_loss = sum(voxel_collisions)
         total_pbl_loss = total_oob_loss + total_mbl_loss
@@ -1643,12 +1644,12 @@ class VoxelReward:
         }
         
         if self.verbose:
-            print(f"\n场景评估结果:")
-            print(f"  OOB损失: {total_oob_loss:.6f}")
-            print(f"  MBL损失: {total_mbl_loss:.6f}")
-            print(f"  PBL损失: {total_pbl_loss:.6f}")
-            print(f"  出界物体: {metrics['num_oob_objects']}/{len(all_objects)}")
-            print(f"  碰撞对数: {metrics['num_collision_pairs']}")
+            print(f"\nScene evaluation results:")
+            print(f"  OOB loss: {total_oob_loss:.6f}")
+            print(f"  MBL loss: {total_mbl_loss:.6f}")
+            print(f"  PBL loss: {total_pbl_loss:.6f}")
+            print(f"  OOB objects: {metrics['num_oob_objects']}/{len(all_objects)}")
+            print(f"  Collision pairs: {metrics['num_collision_pairs']}")
         
         return metrics
     
@@ -1656,84 +1657,84 @@ class VoxelReward:
                       scene_data: Union[Dict, str, Path],
                       format_type: str = 'ours') -> Tuple[float, Dict[str, Any]]:
         """
-        计算场景的强化学习奖励
+        Compute reinforcement learning reward for the scene
         
-        参数:
-            scene_data: 场景数据，可以是字典、JSON文件路径或Path对象
-            format_type: 场景格式类型，'ours' 或 'respace'
+        Args:
+            scene_data: Scene data, can be a dict, JSON file path, or Path object
+            format_type: Scene format type, 'ours' or 'respace'
         
-        返回:
-            (reward, metrics) 元组：
-            - reward: 奖励值
-              - PBL损失 > 0.1: -1.0
-              - PBL损失在 [1e-5, 0.1] 之间: 线性插值从 -1.0 到 +1.0
-              - PBL损失 < 1e-5: +1.0
-            - metrics: 详细评估指标字典
+        Returns:
+            (reward, metrics) tuple:
+            - reward: Reward value
+              - PBL loss > 0.1: -1.0
+              - PBL loss in [1e-5, 0.1]: linear interpolation from -1.0 to +1.0
+              - PBL loss < 1e-5: +1.0
+            - metrics: Detailed evaluation metrics dictionary
         """
-        # 评估场景
+        # Evaluate scene
         metrics = self.evaluate_scene(scene_data, format_type)
         
-        # 根据PBL损失计算奖励（分段线性）
+        # Compute reward based on PBL loss (piecewise linear)
         pbl_loss = metrics['total_pbl_loss']
         
         if pbl_loss < self.reward_threshold:
-            # 非常好：PBL损失 < 1e-5
+            # Very good: PBL loss < 1e-5
             reward = 1.0
         elif pbl_loss <= 0.1:
-            # 中等：在 [1e-5, 0.1] 之间线性插值
+            # Medium: linear interpolation in [1e-5, 0.1]
             # reward = -1.0 + 2.0 * (0.1 - pbl_loss) / (0.1 - 1e-5)
-            # 简化：pbl_loss 从 1e-5 增长到 0.1，reward 从 1.0 降到 -1.0
+            # Simplified: pbl_loss grows from 1e-5 to 0.1, reward goes from 1.0 to -1.0
             reward = 1.0 - 2.0 * (pbl_loss - self.reward_threshold) / (0.1 - self.reward_threshold)
         else:
-            # 差：PBL损失 > 0.1
+            # Poor: PBL loss > 0.1
             reward = -1.0
         
         if self.verbose:
-            print(f"\n奖励计算:")
-            print(f"  PBL损失: {pbl_loss:.6e}")
-            print(f"  阈值: {self.reward_threshold:.6e}")
-            print(f"  奖励: {reward:.4f}")
+            print(f"\nReward calculation:")
+            print(f"  PBL loss: {pbl_loss:.6e}")
+            print(f"  Threshold: {self.reward_threshold:.6e}")
+            print(f"  Reward: {reward:.4f}")
         
         return reward, metrics
 
 
 # ========================================
-# Trimesh-based Physics Metrics (参考myeval实现)
+# Trimesh-based Physics Metrics (reference myeval implementation)
 # ========================================
 
 class TrimeshPhysicsMetrics:
     """
-    基于Trimesh碰撞检测的物理指标计算类
-    完全参考myeval.py的实现方式，使用trimesh.collision.CollisionManager
-    而不是体素化方法
+    Trimesh collision detection-based physics metrics calculation class.
+    Fully references myeval.py implementation, using trimesh.collision.CollisionManager
+    instead of voxelization methods.
     
-    此版本支持异型房间（L型、T型等）的精确出界检测，
-    并删除了碰撞检测的容差
+    This version supports irregular rooms (L-shaped, T-shaped, etc.) for precise
+    out-of-bounds detection, and removes collision detection tolerance.
     """
     
     def __init__(self,
                  models_base_path: str = None,
                  verbose: bool = False):
         """
-        初始化Trimesh物理指标计算器
+        Initialize Trimesh physics metrics calculator
         
-        参数:
-            models_base_path: 3D模型文件基础路径 (3D-FUTURE-model目录)
-                             当使用 Objaverse 资产时可以为 None
-            verbose: 是否输出详细日志
+        Args:
+            models_base_path: Base path for 3D model files (3D-FUTURE-model directory)
+                             Can be None when using Objaverse assets
+            verbose: Whether to output detailed logs
         """
         self.verbose = verbose
         
-        # models_base_path 现在是可选的
-        # 只在使用 3D-FUTURE 资产时才需要
+        # models_base_path is now optional
+        # Only needed when using 3D-FUTURE assets
         if models_base_path:
             self.models_base_path = Path(models_base_path)
             if not self.models_base_path.exists():
-                # 改为警告而非错误，允许在 Objaverse 模式下继续运行
+                # Changed to warning instead of error, allowing continued operation in Objaverse mode
                 if self.verbose:
                     print(f"Warning: Models base path does not exist: {self.models_base_path}")
                     print(f"  3D-FUTURE assets will use placeholder boxes")
-                # 设为 None 表示不可用
+                # Set to None to indicate unavailable
                 self.models_base_path = None
         else:
             self.models_base_path = None
@@ -1747,40 +1748,40 @@ class TrimeshPhysicsMetrics:
     
     def _create_floor_polygon(self, bounds_bottom):
         """
-        从房间底部边界创建地板多边形（支持异型房间）
+        Create floor polygon from room bottom bounds (supports irregular rooms)
         
         Args:
-            bounds_bottom: 底部边界顶点列表 [[x1,y1,z1], [x2,y2,z2], ...]
+            bounds_bottom: List of bottom boundary vertices [[x1,y1,z1], [x2,y2,z2], ...]
         
         Returns:
-            shapely.geometry.Polygon: 地板多边形（使用X和Z坐标）
+            shapely.geometry.Polygon: Floor polygon (using X and Z coordinates)
         """
         from shapely.geometry import Polygon
-        # 使用X和Z坐标创建2D多边形（Y是高度方向）
+        # Use X and Z coordinates to create 2D polygon (Y is the height axis)
         points = [(pt[0], pt[2]) for pt in bounds_bottom]
         return Polygon(points)
     
     def _create_room_mesh(self, bounds_bottom, bounds_top):
         """
-        从多边形边界创建真实的房间mesh（支持异型房间）
+        Create actual room mesh from polygon boundaries (supports irregular rooms)
         
         Args:
-            bounds_bottom: 底部边界顶点列表
-            bounds_top: 顶部边界顶点列表
+            bounds_bottom: List of bottom boundary vertices
+            bounds_top: List of top boundary vertices
         
         Returns:
-            trimesh.Trimesh: 房间mesh对象
+            trimesh.Trimesh: Room mesh object
         """
         bounds_bottom = np.array(bounds_bottom)
         bounds_top = np.array(bounds_top)
         
-        # 创建地板多边形
+        # Create floor polygon
         floor_polygon = self._create_floor_polygon(bounds_bottom.tolist())
         
         num_verts = len(bounds_bottom)
         all_vertices = np.concatenate([bounds_bottom, bounds_top], axis=0)
         
-        # 使用trimesh三角化地板多边形
+        # Triangulate floor polygon using trimesh
         try:
             vtx, floor_faces = trimesh.creation.triangulate_polygon(floor_polygon, engine="triangle")
         except Exception:
@@ -1789,15 +1790,15 @@ class TrimeshPhysicsMetrics:
             except Exception:
                 floor_faces = np.array([[0, i, i+1] for i in range(1, num_verts-1)])
         
-        # 移除无效面
+        # Remove invalid faces
         valid_mask = np.all(floor_faces < num_verts, axis=1)
         floor_faces = floor_faces[valid_mask]
         
-        # 创建天花板面
+        # Create ceiling faces
         ceiling_faces = floor_faces + num_verts
         ceiling_faces = ceiling_faces[:, ::-1]
         
-        # 创建侧面
+        # Create side faces
         side_faces = []
         for i in range(num_verts):
             next_i = (i + 1) % num_verts
@@ -1805,10 +1806,10 @@ class TrimeshPhysicsMetrics:
             side_faces.append([next_i, next_i + num_verts, i + num_verts])
         side_faces = np.array(side_faces)
         
-        # 合并所有面
+        # Merge all faces
         all_faces = np.concatenate([floor_faces, ceiling_faces, side_faces], axis=0)
         
-        # 创建mesh并修复法线
+        # Create mesh and fix normals
         room_mesh = trimesh.Trimesh(vertices=all_vertices, faces=all_faces)
         trimesh.repair.fix_normals(room_mesh)
         
@@ -1817,15 +1818,15 @@ class TrimeshPhysicsMetrics:
     def _check_object_out_of_bounds(self, obj_mesh, room_mesh, floor_polygon, 
                                     room_height_min, room_height_max, num_samples=500):
         """
-        使用mesh containment检测物体是否出界（支持异型房间和高度检测）
+        Use mesh containment to detect if an object is out of bounds (supports irregular rooms and height detection)
         
         Args:
-            obj_mesh: 物体的trimesh对象
-            room_mesh: 房间的trimesh对象
-            floor_polygon: 房间地板的shapely多边形
-            room_height_min: 房间最低高度
-            room_height_max: 房间最高高度
-            num_samples: 采样点数量
+            obj_mesh: Object's trimesh object
+            room_mesh: Room's trimesh object
+            floor_polygon: Room floor's shapely polygon
+            room_height_min: Minimum room height
+            room_height_max: Maximum room height
+            num_samples: Number of sample points
         
         Returns:
             (is_oob: bool, oob_volume: float)
@@ -1833,26 +1834,26 @@ class TrimeshPhysicsMetrics:
         from shapely.geometry import Point
         
         try:
-            # 在物体mesh上采样点
+            # Sample points on the object mesh
             sample_points = obj_mesh.sample(num_samples)
             
-            # 检测2D出界（XZ平面）
-            # 注意：shapely的contains()对于边界上的点返回False，这会导致贴墙放置的家具被误判为出界
-            # 解决方案：给多边形添加微小缓冲区(1mm)，使边界上的点被正确判定为在内部
-            buffered_polygon = floor_polygon.buffer(0.001)  # 1mm缓冲区
+            # Detect 2D out-of-bounds (XZ plane)
+            # Note: shapely's contains() returns False for points on the boundary, causing wall-adjacent furniture to be falsely flagged
+            # Solution: add a tiny buffer (1mm) to the polygon so boundary points are correctly classified as inside
+            buffered_polygon = floor_polygon.buffer(0.001)  # 1mm buffer
             points_2d = [Point(pt[0], pt[2]) for pt in sample_points]
             inside_2d = np.array([buffered_polygon.contains(p) for p in points_2d])
             
-            # 检测高度出界（Y方向）- 同样添加微小容差
-            height_tolerance = 0.001  # 1mm容差
+            # Detect height out-of-bounds (Y direction) - also add a tiny tolerance
+            height_tolerance = 0.001  # 1mm tolerance
             inside_height = (sample_points[:, 1] >= room_height_min - height_tolerance) & (sample_points[:, 1] <= room_height_max + height_tolerance)
             
-            # 综合判断
+            # Combined judgment
             inside = inside_2d & inside_height
             
             oob_ratio = 1.0 - (inside.sum() / len(inside))
             
-            if oob_ratio > 0.01:  # 超过1%的点在外面
+            if oob_ratio > 0.01:  # More than 1% of points are outside
                 is_oob = True
                 obj_volume = obj_mesh.volume if hasattr(obj_mesh, 'volume') and obj_mesh.volume > 0 else np.prod(obj_mesh.extents)
                 oob_volume = obj_volume * oob_ratio
@@ -1864,8 +1865,8 @@ class TrimeshPhysicsMetrics:
             
         except Exception as e:
             if self.verbose:
-                print(f"警告: 出界检测采样失败: {e}，使用边界框备用方案")
-            # 备用方案
+                print(f"Warning: OOB detection sampling failed: {e}, using bounding box fallback")
+            # Fallback method
             obj_bounds = obj_mesh.bounds
             room_bounds = room_mesh.bounds
             
@@ -1875,13 +1876,13 @@ class TrimeshPhysicsMetrics:
             return False, 0.0
     def _parse_scene_data(self, scene_json: Dict, format_type: str = 'ours'):
         """
-        解析场景JSON数据，支持两种格式
+        Parse scene JSON data, supports two formats
         
-        参数:
-            scene_json: 场景JSON数据
-            format_type: 'ours' 或 'respace'
+        Args:
+            scene_json: Scene JSON data
+            format_type: 'ours' or 'respace'
         
-        返回:
+        Returns:
             bounds_bottom, bounds_top, all_objects
         """
         if format_type == 'respace':
@@ -1889,8 +1890,8 @@ class TrimeshPhysicsMetrics:
             bounds_top = scene_json.get('bounds_top', [])
             all_objects_data = scene_json.get('objects', [])
         else:
-            # ours格式：使用room_envelope和groups结构
-            # 也支持flat格式（直接有objects字段）
+            # ours format: uses room_envelope and groups structure
+            # Also supports flat format (with direct objects field)
             if 'room_envelope' in scene_json:
                 bounds_bottom = scene_json['room_envelope']['bounds_bottom']
                 bounds_top = scene_json['room_envelope']['bounds_top']
@@ -1904,40 +1905,40 @@ class TrimeshPhysicsMetrics:
                     if 'objects' in group and group['objects'] is not None:
                         all_objects_data.extend(group['objects'])
             elif 'objects' in scene_json:
-                # 支持flat格式
+                # Support flat format
                 all_objects_data = scene_json['objects']
         
         return bounds_bottom, bounds_top, all_objects_data
     
     def _load_and_transform_mesh(self, obj_data: Dict, format_type: str = 'ours') -> Optional['trimesh.Trimesh']:
         """
-        加载并变换物体的mesh（参考myeval的实现）
+        Load and transform object mesh (references myeval implementation)
         
-        支持两种资产来源:
-        - 3D-FUTURE: 使用 'jid' 字段，从 models_base_path/{jid}/raw_model.glb 加载
-        - Objaverse: 使用 'uid' 字段，从 GLB 缓存加载
+        Supports two asset sources:
+        - 3D-FUTURE: Uses 'jid' field, loads from models_base_path/{jid}/raw_model.glb
+        - Objaverse: Uses 'uid' field, loads from GLB cache
         
-        参数:
-            obj_data: 物体数据字典
-            format_type: 'ours' 或 'respace'
+        Args:
+            obj_data: Object data dictionary
+            format_type: 'ours' or 'respace'
         
-        返回:
-            变换后的trimesh对象，如果失败则返回None
+        Returns:
+            Transformed trimesh object, or None on failure
         """
         try:
-            # 获取目标尺寸
+            # Get target size
             if format_type == 'respace':
                 target_size = obj_data.get('sampled_asset_size', obj_data.get('size', [1, 1, 1]))
             else:
                 target_size = obj_data.get('size', [1, 1, 1])
             
-            # 确定资产来源和模型路径
+            # Determine asset source and model path
             asset_source = obj_data.get('asset_source', '3d-future')
             model_path = None
             asset_id = None
             
             if asset_source == 'objaverse':
-                # Objaverse 资产：使用 uid 和 GLB 缓存
+                # Objaverse asset: use uid and GLB cache
                 uid = obj_data.get('uid')
                 if uid:
                     asset_id = uid
@@ -1945,13 +1946,13 @@ class TrimeshPhysicsMetrics:
                     if model_path and self.verbose:
                         print(f"Found Objaverse GLB for {uid[:16]}...: {model_path}")
             else:
-                # 3D-FUTURE 资产：使用 jid
+                # 3D-FUTURE asset: use jid
                 if format_type == 'respace':
                     jid = obj_data.get('sampled_asset_jid', obj_data.get('jid', 'N/A'))
                 else:
                     jid = obj_data.get('jid', 'N/A')
                 asset_id = jid
-                # 只有在 models_base_path 可用时才尝试加载 3D-FUTURE 模型
+                # Only try loading 3D-FUTURE models when models_base_path is available
                 if self.models_base_path is not None:
                     model_path = self.models_base_path / jid / 'raw_model.glb'
                 else:
@@ -1959,16 +1960,16 @@ class TrimeshPhysicsMetrics:
                 if not model_path.exists():
                     model_path = None
             
-            # 加载模型
+            # Load model
             if model_path is None or not model_path.exists():
                 if self.verbose:
                     print(f"Warning: Model not found for {asset_id}, using box placeholder")
                 mesh = trimesh.creation.box(extents=target_size)
             else:
                 loaded = trimesh.load(str(model_path))
-                # 处理 trimesh.load 返回 Scene 对象的情况
+                # Handle case where trimesh.load returns a Scene object
                 if isinstance(loaded, trimesh.Scene):
-                    # 将场景中所有几何体合并为一个 mesh
+                    # Merge all geometries in the scene into a single mesh
                     if len(loaded.geometry) > 0:
                         mesh = trimesh.util.concatenate(list(loaded.geometry.values()))
                     else:
@@ -1978,23 +1979,23 @@ class TrimeshPhysicsMetrics:
                 else:
                     mesh = loaded
             
-            # ==== Objaverse 坐标系校正 ====
-            # Objaverse GLB 模型需要重置初始旋转（与 blender_renderer.py 保持一致）
-            # 这确保物理计算与渲染结果一致
+            # ==== Objaverse coordinate system correction ====
+            # Objaverse GLB models need initial rotation reset (consistent with blender_renderer.py)
+            # This ensures physics calculations match rendering results
             if asset_source == 'objaverse' and model_path is not None and model_path.exists():
-                # Objaverse 模型：重置到标准朝向（无需额外旋转校正）
-                # 渲染时使用 rotation_euler = (0, 0, 0)，这里保持 mesh 原样即可
-                # 因为 trimesh 加载的 GLB 已经是正确朝向
+                # Objaverse model: reset to standard orientation (no extra rotation correction needed)
+                # Rendering uses rotation_euler = (0, 0, 0), so keep mesh as-is
+                # Because trimesh-loaded GLB is already in the correct orientation
                 if self.verbose:
                     print(f"Objaverse asset {asset_id}: using standard orientation (no correction needed)")
             
-            # 1. 缩放到目标尺寸
+            # 1. Scale to target size
             original_size = mesh.extents
             target_size_array = np.array(target_size)
             scale_factors = target_size_array / (original_size + 1e-6)
             mesh.apply_scale(scale_factors)
             
-            # 2. 旋转
+            # 2. Rotate
             pos = obj_data['pos']
             rot_xyzw = obj_data['rot']
             
@@ -2003,19 +2004,19 @@ class TrimeshPhysicsMetrics:
             transform_matrix[:3, :3] = rotation.as_matrix()
             transform_matrix[:3, 3] = pos
             
-            # 3. 计算底部中心作为锚点
+            # 3. Compute bottom center as anchor point
             bounds = mesh.bounds
             bottom_center_pivot = np.array([
-                (bounds[0, 0] + bounds[1, 0]) / 2,  # X轴中心
-                bounds[0, 1],                        # Y轴底部
-                (bounds[0, 2] + bounds[1, 2]) / 2    # Z轴中心
+                (bounds[0, 0] + bounds[1, 0]) / 2,  # X-axis center
+                bounds[0, 1],                        # Y-axis bottom
+                (bounds[0, 2] + bounds[1, 2]) / 2    # Z-axis center
             ])
             
-            # 移动到原点
+            # Move to origin
             center_transform = np.eye(4)
             center_transform[:3, 3] = -bottom_center_pivot
             
-            # 应用完整变换
+            # Apply full transform
             mesh.apply_transform(center_transform)
             mesh.apply_transform(transform_matrix)
             
@@ -2030,31 +2031,31 @@ class TrimeshPhysicsMetrics:
                       scene_data: Union[Dict, str, Path],
                       format_type: str = 'ours') -> Dict[str, Any]:
         """
-        评估场景的物理指标（完全参考myeval实现）
+        Evaluate scene physics metrics (fully references myeval implementation)
         
-        参数:
-            scene_data: 场景数据，可以是字典、JSON文件路径或Path对象
-            format_type: 场景格式类型，'ours' 或 'respace'
+        Args:
+            scene_data: Scene data, can be a dict, JSON file path, or Path object
+            format_type: Scene format type, 'ours' or 'respace'
         
-        返回:
-            包含以下指标的字典：
-            - collision_free_rate: 无碰撞率 (%)
-            - num_colliding_pairs: 碰撞对数量
-            - collision_rate: 碰撞率 (%)
-            - mean_penetration_depth: 平均穿透深度 (m)
-            - valid_placement_rate: 有效放置率 (%)
-            - num_oob_objects: 出界物体数量
-            - out_of_bounds_rate: 出界率 (%)
-            - mean_oob_volume: 平均出界体积 (m³)
+        Returns:
+            Dictionary containing the following metrics:
+            - collision_free_rate: Collision-free rate (%)
+            - num_colliding_pairs: Number of colliding pairs
+            - collision_rate: Collision rate (%)
+            - mean_penetration_depth: Mean penetration depth (m)
+            - valid_placement_rate: Valid placement rate (%)
+            - num_oob_objects: Number of out-of-bounds objects
+            - out_of_bounds_rate: Out-of-bounds rate (%)
+            - mean_oob_volume: Mean out-of-bounds volume (m³)
         """
-        # 加载场景数据
+        # Load scene data
         if isinstance(scene_data, (str, Path)):
             with open(scene_data, 'r', encoding='utf-8') as f:
                 scene_json = json.load(f)
         else:
             scene_json = scene_data
         
-        # 解析场景数据
+        # Parse scene data
         bounds_bottom, bounds_top, all_objects_data = self._parse_scene_data(scene_json, format_type)
         
         if len(all_objects_data) == 0:
@@ -2071,33 +2072,33 @@ class TrimeshPhysicsMetrics:
         
         total_objects = len(all_objects_data)
         
-        # 创建房间mesh和地板多边形（支持异型房间）
+        # Create room mesh and floor polygon (supports irregular rooms)
         bounds_bottom_arr = np.array(bounds_bottom)
         bounds_top_arr = np.array(bounds_top)
         
         room_mesh = self._create_room_mesh(bounds_bottom, bounds_top)
         floor_polygon = self._create_floor_polygon(bounds_bottom)
         
-        # 计算房间高度范围
+        # Compute room height range
         room_height_min = bounds_bottom_arr[:, 1].min()
         room_height_max = bounds_top_arr[:, 1].max()
         room_bounds = room_mesh.bounds
         
-        # 加载并变换所有物体的mesh
-        # 同时构建 name_to_meta 映射，用于生成可读的反馈
+        # Load and transform all object meshes
+        # Also build name_to_meta mapping for generating readable feedback
         furniture_objects = {}
-        name_to_meta = {}  # 存储 name -> {idx, jid, uid, desc, asset_source} 的映射
+        name_to_meta = {}  # Store name -> {idx, jid, uid, desc, asset_source} mapping
         
         for i, obj_data in enumerate(all_objects_data):
             mesh = self._load_and_transform_mesh(obj_data, format_type)
             if mesh is not None:
-                # 优先使用 uid（Objaverse），否则使用 jid（3D-FUTURE）
+                # Prefer uid (Objaverse), otherwise use jid (3D-FUTURE)
                 uid = obj_data.get('uid', '')
                 jid = obj_data.get('jid', f'object_{i}')
                 desc = obj_data.get('desc', obj_data.get('category', 'unknown'))
                 asset_source = obj_data.get('asset_source', '3d-future')
                 
-                # 使用更短但唯一的命名
+                # Use shorter but unique naming
                 if uid:
                     obj_name = f"obj_{i}_{uid[:8]}"
                 else:
@@ -2124,26 +2125,26 @@ class TrimeshPhysicsMetrics:
                 'mean_oob_volume': 0.0
             }
         
-        # ===== 碰撞检测 =====
+        # ===== Collision Detection =====
         manager = trimesh.collision.CollisionManager()
         for name, mesh in furniture_objects.items():
             manager.add_object(name, mesh)
         
-        # 获取所有碰撞数据
+        # Get all collision data
         is_collision, contact_data = manager.in_collision_internal(return_data=True)
         
-        # 所有穿透深度 > 0 的都视为碰撞（删除容差）
+        # All penetration depths > 0 are treated as collisions (tolerance removed)
         actual_collisions_data = [d for d in contact_data if d.depth > 0]
         
         num_colliding_pairs = len(actual_collisions_data)
         
-        # 计算涉及碰撞的物体数量，并构建碰撞对列表
+        # Compute number of colliding objects and build collision pair list
         colliding_objects = set()
-        collision_pairs_raw = []  # 存储原始碰撞对信息
+        collision_pairs_raw = []  # Store raw collision pair info
         
         for contact in actual_collisions_data:
             if hasattr(contact, 'names') and contact.names is not None:
-                # contact.names 可能是 list, tuple, frozenset, set 等类型
+                # contact.names can be list, tuple, frozenset, set, etc.
                 names_list = list(contact.names) if hasattr(contact.names, '__iter__') else []
                 
                 if len(names_list) >= 2:
@@ -2161,41 +2162,41 @@ class TrimeshPhysicsMetrics:
         num_colliding_objects = len(colliding_objects)
         collision_rate = (num_colliding_objects / total_objects * 100) if total_objects > 0 else 0.0
         
-        # 计算平均穿透深度
+        # Compute mean penetration depth
         total_penetration_depth = 0
         if num_colliding_pairs > 0:
             for contact in actual_collisions_data:
-                # 累加完整的穿透深度（删除容差减法）
+                # Accumulate full penetration depth (tolerance subtraction removed)
                 total_penetration_depth += contact.depth
         
         mean_penetration_depth = (total_penetration_depth / num_colliding_pairs) if num_colliding_pairs > 0 else 0
         
-        # ===== 出界检测（支持异型房间）=====
+        # ===== Out-of-Bounds Detection (supports irregular rooms) =====
         num_oob_objects = 0
         total_oob_volume = 0
-        oob_objects_raw = []  # 存储出界物体信息
+        oob_objects_raw = []  # Store OOB object info
         
         for name, mesh in furniture_objects.items():
-            # 使用精确的多边形+高度检测
+            # Use precise polygon + height detection
             is_oob, oob_volume = self._check_object_out_of_bounds(
                 mesh, room_mesh, floor_polygon, room_height_min, room_height_max
             )
             if is_oob:
                 num_oob_objects += 1
                 total_oob_volume += oob_volume
-                # 计算出界比例
+                # Compute out-of-bounds ratio
                 obj_volume = mesh.volume if hasattr(mesh, 'volume') and mesh.volume > 0 else np.prod(mesh.extents)
                 oob_ratio = oob_volume / obj_volume if obj_volume > 0 else 0.0
                 oob_objects_raw.append({
                     'name': name,
                     'oob_volume': oob_volume,
-                    'oob_ratio': min(oob_ratio, 1.0)  # 限制在 0-1
+                    'oob_ratio': min(oob_ratio, 1.0)  # Clamp to 0-1
                 })
         
         mean_oob_volume = (total_oob_volume / num_oob_objects) if num_oob_objects > 0 else 0
         out_of_bounds_rate = (num_oob_objects / total_objects * 100) if total_objects > 0 else 0.0
         
-        # ===== 构建碰撞对列表（带元数据，按深度排序）=====
+        # ===== Build collision pairs list (with metadata, sorted by depth) =====
         collision_pairs = []
         for pair in sorted(collision_pairs_raw, key=lambda x: x['depth'], reverse=True):
             meta_a = name_to_meta.get(pair['name_a'], {})
@@ -2206,10 +2207,10 @@ class TrimeshPhysicsMetrics:
                 'obj_b_desc': meta_b.get('desc', 'unknown'),
                 'obj_b_id': meta_b.get('uid') or meta_b.get('jid', 'unknown'),
                 'depth': pair['depth'],
-                'depth_cm': round(pair['depth'] * 100, 1)  # 转换为厘米
+                'depth_cm': round(pair['depth'] * 100, 1)  # Convert to centimeters
             })
         
-        # ===== 构建出界物体列表（带元数据，按出界比例排序）=====
+        # ===== Build OOB objects list (with metadata, sorted by OOB ratio) =====
         oob_objects = []
         for obj in sorted(oob_objects_raw, key=lambda x: x['oob_ratio'], reverse=True):
             meta = name_to_meta.get(obj['name'], {})
@@ -2218,33 +2219,33 @@ class TrimeshPhysicsMetrics:
                 'obj_id': meta.get('uid') or meta.get('jid', 'unknown'),
                 'oob_volume': obj['oob_volume'],
                 'oob_ratio': obj['oob_ratio'],
-                'oob_percent': round(obj['oob_ratio'] * 100, 1)  # 转换为百分比
+                'oob_percent': round(obj['oob_ratio'] * 100, 1)  # Convert to percentage
             })
         
-        # 构建结果
+        # Build results
         metrics = {
             'collision_free_rate': 100.0 if num_colliding_pairs == 0 else 0.0,
             'num_colliding_pairs': num_colliding_pairs,
             'collision_rate': collision_rate,
             'mean_penetration_depth': mean_penetration_depth,
-            'total_penetration_depth': total_penetration_depth,  # 总穿透深度（用于体积奖励）
+            'total_penetration_depth': total_penetration_depth,  # Total penetration depth (for volume reward)
             'valid_placement_rate': 100.0 if num_oob_objects == 0 else 0.0,
             'num_oob_objects': num_oob_objects,
             'out_of_bounds_rate': out_of_bounds_rate,
             'mean_oob_volume': mean_oob_volume,
-            'total_oob_volume': total_oob_volume,  # 总出界体积（用于体积奖励）
-            # 新增：碰撞对和出界物体详细列表
+            'total_oob_volume': total_oob_volume,  # Total OOB volume (for volume reward)
+            # New: detailed collision pair and OOB object lists
             'collision_pairs': collision_pairs,  # List[{obj_a_desc, obj_a_id, obj_b_desc, obj_b_id, depth, depth_cm}]
             'oob_objects': oob_objects  # List[{desc, obj_id, oob_volume, oob_ratio, oob_percent}]
         }
         
         if self.verbose:
-            print(f"\nTrimesh物理指标评估结果:")
-            print(f"  碰撞率: {collision_rate:.2f}%")
-            print(f"  碰撞对数: {num_colliding_pairs}")
-            print(f"  平均穿透深度: {mean_penetration_depth:.6f}m")
-            print(f"  出界率: {out_of_bounds_rate:.2f}%")
-            print(f"  出界物体: {num_oob_objects}/{total_objects}")
+            print(f"\nTrimesh physics metrics evaluation results:")
+            print(f"  Collision rate: {collision_rate:.2f}%")
+            print(f"  Colliding pairs: {num_colliding_pairs}")
+            print(f"  Mean penetration depth: {mean_penetration_depth:.6f}m")
+            print(f"  Out-of-bounds rate: {out_of_bounds_rate:.2f}%")
+            print(f"  OOB objects: {num_oob_objects}/{total_objects}")
         
         return metrics
     
@@ -2252,85 +2253,85 @@ class TrimeshPhysicsMetrics:
                       scene_data: Union[Dict, str, Path],
                       format_type: str = 'ours') -> Tuple[float, Dict[str, Any]]:
         """
-        基于物理指标计算奖励
+        Compute reward based on physics metrics
         
-        奖励计算策略（基于SFT基线调整）：
+        Reward calculation strategy (adjusted based on SFT baseline):
         
-        碰撞率（SFT基线45%为零点）：
-        - 碰撞率 ≤ 20%: +1.0 到 +0.5（优秀）
-        - 碰撞率 20%-45%: +0.5 到 0.0（SFT基线为零点）
-        - 碰撞率 > 45%: 0.0 到 -1.0（比SFT差）
+        Collision rate (SFT baseline 45% as zero point):
+        - Collision rate ≤ 20%: +1.0 to +0.5 (excellent)
+        - Collision rate 20%-45%: +0.5 to 0.0 (SFT baseline as zero point)
+        - Collision rate > 45%: 0.0 to -1.0 (worse than SFT)
         
-        出界率（SFT基线30%为零点）：
-        - 出界率 ≤ 10%: +1.0 到 +0.5（优秀）
-        - 出界率 10%-30%: +0.5 到 0.0（SFT基线为零点）
-        - 出界率 > 30%: 0.0 到 -1.0（比SFT差）
+        Out-of-bounds rate (SFT baseline 30% as zero point):
+        - OOB rate ≤ 10%: +1.0 to +0.5 (excellent)
+        - OOB rate 10%-30%: +0.5 to 0.0 (SFT baseline as zero point)
+        - OOB rate > 30%: 0.0 to -1.0 (worse than SFT)
         
-        最终奖励 = (碰撞奖励 + 出界奖励) / 2
+        Final reward = (collision_reward + oob_reward) / 2
         
-        参数:
-            scene_data: 场景数据
-            format_type: 场景格式类型
+        Args:
+            scene_data: Scene data
+            format_type: Scene format type
         
-        返回:
-            (reward, metrics) 元组
+        Returns:
+            (reward, metrics) tuple
         """
         metrics = self.evaluate_scene(scene_data, format_type)
         
         collision_rate = metrics['collision_rate']
         oob_rate = metrics['out_of_bounds_rate']
         
-        # 碰撞奖励（基于SFT基线45%调整）
+        # Collision reward (adjusted based on SFT baseline 45%)
         if collision_rate <= 20:
-            # 优秀区间：0% -> +1.0, 20% -> +0.5
+            # Excellent range: 0% -> +1.0, 20% -> +0.5
             collision_reward = 1.0 - 0.5 * (collision_rate / 20.0)
         elif collision_rate <= 45:
-            # 良好区间（SFT基线为零点）：20% -> +0.5, 45% -> 0.0
+            # Good range (SFT baseline as zero point): 20% -> +0.5, 45% -> 0.0
             collision_reward = 0.5 - 0.5 * (collision_rate - 20) / 25.0
         else:
-            # 差于SFT：45% -> 0.0, 100% -> -1.0
+            # Worse than SFT: 45% -> 0.0, 100% -> -1.0
             collision_reward = -1.0 * (collision_rate - 45) / 55.0
         
-        # 出界奖励（基于SFT基线30%调整）
+        # OOB reward (adjusted based on SFT baseline 30%)
         if oob_rate <= 10:
-            # 优秀区间：0% -> +1.0, 10% -> +0.5
+            # Excellent range: 0% -> +1.0, 10% -> +0.5
             oob_reward = 1.0 - 0.5 * (oob_rate / 10.0)
         elif oob_rate <= 30:
-            # 良好区间（SFT基线为零点）：10% -> +0.5, 30% -> 0.0
+            # Good range (SFT baseline as zero point): 10% -> +0.5, 30% -> 0.0
             oob_reward = 0.5 - 0.5 * (oob_rate - 10) / 20.0
         else:
-            # 差于SFT：30% -> 0.0, 100% -> -1.0
+            # Worse than SFT: 30% -> 0.0, 100% -> -1.0
             oob_reward = -1.0 * (oob_rate - 30) / 70.0
         
-        # 综合奖励
+        # Combined reward
         reward = (collision_reward + oob_reward) / 2.0
         
         if self.verbose:
-            print(f"\n奖励计算:")
-            print(f"  碰撞奖励: {collision_reward:.4f} (碰撞率: {collision_rate:.2f}%)")
-            print(f"  出界奖励: {oob_reward:.4f} (出界率: {oob_rate:.2f}%)")
-            print(f"  综合奖励: {reward:.4f}")
+            print(f"\nReward calculation:")
+            print(f"  Collision reward: {collision_reward:.4f} (collision rate: {collision_rate:.2f}%)")
+            print(f"  OOB reward: {oob_reward:.4f} (OOB rate: {oob_rate:.2f}%)")
+            print(f"  Combined reward: {reward:.4f}")
         
         return reward, metrics
 
 
 def generate_physics_feedback(metrics: Dict[str, Any], top_k: int = 3) -> str:
     """
-    根据物理评估指标生成简洁的反馈文本
+    Generate concise feedback text based on physics evaluation metrics
     
-    参数:
-        metrics: TrimeshPhysicsMetrics.evaluate_scene 返回的指标字典
-        top_k: 最多报告的碰撞对/出界物体数量
+    Args:
+        metrics: Metrics dictionary returned by TrimeshPhysicsMetrics.evaluate_scene
+        top_k: Maximum number of collision pairs/OOB objects to report
     
-    返回:
-        物理反馈文本，如果没有问题则返回空字符串
+    Returns:
+        Physics feedback text, or empty string if there are no issues
     """
     feedback_parts = []
     
-    # 处理碰撞问题
+    # Handle collision issues
     collision_pairs = metrics.get('collision_pairs', [])
     if collision_pairs:
-        # 按穿透深度排序，取最严重的top_k个
+        # Sort by penetration depth, take the top_k most severe
         sorted_collisions = sorted(collision_pairs, key=lambda x: x.get('depth', 0), reverse=True)[:top_k]
         collision_strs = []
         for cp in sorted_collisions:
@@ -2344,10 +2345,10 @@ def generate_physics_feedback(metrics: Dict[str, Any], top_k: int = 3) -> str:
         
         feedback_parts.append(f"Collisions: {'; '.join(collision_strs)}. Separate these objects to avoid overlap.")
     
-    # 处理出界问题
+    # Handle out-of-bounds issues
     oob_objects = metrics.get('oob_objects', [])
     if oob_objects:
-        # 按出界比例排序，取最严重的top_k个
+        # Sort by OOB ratio, take the top_k most severe
         sorted_oob = sorted(oob_objects, key=lambda x: x.get('oob_ratio', 0), reverse=True)[:top_k]
         oob_strs = []
         for obj in sorted_oob:

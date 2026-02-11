@@ -1,26 +1,26 @@
 #!/usr/bin/env python3
 """
-PathConfig - 统一路径配置管理器
+PathConfig - Unified Path Configuration Manager
 
-用于 llmscene 项目中所有路径的集中管理，支持三种初始化方式：
-1. 从 YAML 配置文件读取
-2. 从环境变量读取
-3. 使用默认硬编码路径（回退链）
+Centralized path management for the llmscene project, supporting three initialization methods:
+1. Read from a YAML configuration file
+2. Read from environment variables
+3. Use default hardcoded paths (fallback chain)
 
-优先级：配置文件 (YAML paths 块) > 环境变量 > 默认硬编码路径
+Priority: Config file (YAML paths block) > Environment variables > Default hardcoded paths
 
-使用方法：
-    # 方式1：从配置字典初始化（用于 RL 训练）
+Usage:
+    # Method 1: Initialize from a config dictionary (for RL training)
     from path_config import PathConfig
     PathConfig.init_from_config(config_dict)
     
-    # 方式2：从 YAML 文件初始化
+    # Method 2: Initialize from a YAML file
     PathConfig.init_from_yaml("/path/to/config.yaml")
     
-    # 方式3：自动初始化（从环境变量和默认值）
+    # Method 3: Auto-initialize (from environment variables and defaults)
     paths = PathConfig.get_instance()
     
-    # 获取路径
+    # Get paths
     glb_cache = paths.objaverse_glb_cache_dir
     blender_exe = paths.blender_executable
 """
@@ -33,50 +33,50 @@ from typing import Dict, Any, Optional, List
 
 class PathConfig:
     """
-    统一的路径配置管理器（单例模式）
+    Unified path configuration manager (singleton pattern)
     
     Attributes:
-        objaverse_base_dir: Objaverse 资产基础目录
-        objaverse_glb_cache_dir: Objaverse GLB 缓存目录
-        objaverse_assets_version: Objaverse 资产版本（默认 2023_09_23）
+        objaverse_base_dir: Objaverse assets base directory
+        objaverse_glb_cache_dir: Objaverse GLB cache directory
+        objaverse_assets_version: Objaverse assets version (default 2023_09_23)
         
-        future3d_models_dir: 3D-FUTURE 模型目录
-        future3d_metadata_json: 3D-FUTURE 元数据 JSON 路径
-        future3d_metadata_scaled_json: 3D-FUTURE 缩放元数据 JSON 路径
-        future3d_embeddings_pkl: 3D-FUTURE 嵌入 pickle 路径
+        future3d_models_dir: 3D-FUTURE model directory
+        future3d_metadata_json: 3D-FUTURE metadata JSON path
+        future3d_metadata_scaled_json: 3D-FUTURE scaled metadata JSON path
+        future3d_embeddings_pkl: 3D-FUTURE embeddings pickle path
         
-        blender_executable: Blender 可执行文件路径
-        blender_candidates: Blender 备选路径列表
+        blender_executable: Blender executable path
+        blender_candidates: Blender candidate paths list
         
-        logs_dir: 日志目录
-        output_dir: 输出目录
+        logs_dir: Logs directory
+        output_dir: Output directory
     """
     
     _instance: Optional['PathConfig'] = None
     _lock = threading.Lock()
     
-    # ========== 环境检测 ==========
+    # ========== Environment Detection ==========
     @staticmethod
     def _detect_environment() -> str:
         """
-        检测当前运行环境
+        Detect the current runtime environment
         
         Returns:
-            'azure': Azure 云端环境（/path/to/storage 存在）
-            'local': 本地开发环境
+            'azure': Azure cloud environment (/path/to/storage exists)
+            'local': Local development environment
         """
-        # 检查 Azure 特征路径
+        # Check for Azure characteristic path
         if os.path.exists('/path/to/storage'):
             return 'azure'
-        # 检查 AMLT 环境变量
+        # Check AMLT environment variables
         if os.environ.get('AMLT_JOB_ID') or os.environ.get('AZUREML_RUN_ID'):
             return 'azure'
         return 'local'
     
-    # ========== 默认路径定义（根据环境动态选择）==========
+    # ========== Default Path Definitions (dynamically selected based on environment) ==========
     @classmethod
     def _get_objaverse_candidates(cls) -> List[str]:
-        """获取 Objaverse 路径候选列表，根据环境调整优先级"""
+        """Get Objaverse path candidate list, with priority adjusted by environment"""
         env = cls._detect_environment()
         
         azure_paths = [
@@ -97,7 +97,7 @@ class PathConfig:
     
     @classmethod
     def _get_3dfuture_candidates(cls) -> List[str]:
-        """获取 3D-FUTURE 路径候选列表，根据环境调整优先级"""
+        """Get 3D-FUTURE path candidate list, with priority adjusted by environment"""
         env = cls._detect_environment()
         
         azure_paths = [
@@ -117,7 +117,7 @@ class PathConfig:
     
     @classmethod
     def _get_logs_candidates(cls) -> List[str]:
-        """获取日志路径候选列表，根据环境调整优先级"""
+        """Get log path candidate list, with priority adjusted by environment"""
         env = cls._detect_environment()
         
         azure_paths = [
@@ -134,7 +134,7 @@ class PathConfig:
         else:
             return local_paths + azure_paths
     
-    # Blender 路径（通常不受环境影响）
+    # Blender paths (typically not affected by environment)
     _BLENDER_CANDIDATES = [
         os.path.expanduser("~/.local/bin/blender"),
         os.path.expanduser("~/.local/blender/blender-4.0.2-linux-x64/blender"),
@@ -149,21 +149,21 @@ class PathConfig:
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
-        初始化路径配置
+        Initialize path configuration
         
         Args:
-            config: 配置字典，可以包含 'paths' 键
+            config: Configuration dictionary, may contain a 'paths' key
         """
         self._config = config or {}
         paths_config = self._config.get('paths', {})
         
-        # 检测运行环境并打印
+        # Detect runtime environment
         self._detected_env = self._detect_environment()
         
-        # ========== Objaverse 路径 ==========
+        # ========== Objaverse Paths ==========
         objaverse_config = paths_config.get('objaverse', {})
         
-        # 基础目录 - 使用动态候选列表
+        # Base directory - use dynamic candidate list
         self.objaverse_base_dir = self._resolve_path(
             config_value=objaverse_config.get('base_dir'),
             env_var='OBJATHOR_ASSETS_BASE_DIR',
@@ -171,7 +171,7 @@ class PathConfig:
             create_if_missing=False
         )
         
-        # GLB 缓存目录
+        # GLB cache directory
         glb_cache_config = objaverse_config.get('glb_cache_dir')
         if glb_cache_config:
             self.objaverse_glb_cache_dir = glb_cache_config
@@ -182,22 +182,22 @@ class PathConfig:
         else:
             self.objaverse_glb_cache_dir = os.path.expanduser("~/.objaverse/hf-objaverse-v1/glbs")
         
-        # 资产版本
+        # Assets version
         self.objaverse_assets_version = (
             objaverse_config.get('assets_version') or
             os.environ.get('ASSETS_VERSION', '2023_09_23')
         )
         
-        # Holodeck 版本
+        # Holodeck version
         self.holodeck_base_version = (
             objaverse_config.get('holodeck_version') or
             os.environ.get('HD_BASE_VERSION', '2023_09_23')
         )
         
-        # ========== 3D-FUTURE 路径 ==========
+        # ========== 3D-FUTURE Paths ==========
         future3d_config = paths_config.get('3d_future', {})
         
-        # 模型目录 - 使用动态候选列表
+        # Model directory - use dynamic candidate list
         self.future3d_models_dir = self._resolve_path(
             config_value=future3d_config.get('models_dir'),
             env_var='PTH_3DFUTURE_ASSETS',
@@ -205,7 +205,7 @@ class PathConfig:
             create_if_missing=False
         )
         
-        # 元数据文件路径
+        # Metadata file paths
         self.future3d_metadata_json = (
             future3d_config.get('metadata_json') or
             os.environ.get('PTH_ASSETS_METADATA') or
@@ -224,22 +224,22 @@ class PathConfig:
             './metadata/model_info_3dfuture_assets_embeds.pickle'
         )
         
-        # ========== Blender 路径 ==========
+        # ========== Blender Paths ==========
         blender_config = paths_config.get('blender', {})
         
-        # Blender 可执行文件
+        # Blender executable
         self.blender_executable = self._resolve_blender_executable(
             config_value=blender_config.get('executable'),
             additional_candidates=blender_config.get('candidates', [])
         )
         
-        # 保存候选路径供后续使用
+        # Save candidate paths for later use
         self.blender_candidates = (
             blender_config.get('candidates', []) + self._BLENDER_CANDIDATES
         )
         
-        # ========== 日志和输出路径 ==========
-        # 使用动态候选列表
+        # ========== Logs and Output Paths ==========
+        # Use dynamic candidate list
         self.logs_dir = self._resolve_path(
             config_value=paths_config.get('logs_dir'),
             env_var='LLMSCENE_LOGS_DIR',
@@ -261,35 +261,35 @@ class PathConfig:
         create_if_missing: bool = False
     ) -> Optional[str]:
         """
-        解析路径，按优先级：配置值 > 环境变量 > 候选路径链
+        Resolve a path by priority: config value > environment variable > candidate path chain
         
         Args:
-            config_value: 配置文件中的值
-            env_var: 环境变量名
-            candidates: 候选路径列表
-            create_if_missing: 如果路径不存在是否创建
+            config_value: Value from the configuration file
+            env_var: Environment variable name
+            candidates: List of candidate paths
+            create_if_missing: Whether to create the path if it does not exist
             
         Returns:
-            解析后的路径，如果都不存在则返回 None
+            Resolved path, or None if none exist
         """
-        # 1. 配置文件值
+        # 1. Config file value
         if config_value:
             if os.path.exists(config_value) or create_if_missing:
                 if create_if_missing and not os.path.exists(config_value):
                     Path(config_value).mkdir(parents=True, exist_ok=True)
                 return config_value
         
-        # 2. 环境变量
+        # 2. Environment variable
         env_value = os.environ.get(env_var)
         if env_value and os.path.exists(env_value):
             return env_value
         
-        # 3. 候选路径链
+        # 3. Candidate path chain
         for candidate in candidates:
             if os.path.exists(candidate):
                 return candidate
         
-        # 4. 如果允许创建，使用第一个候选路径
+        # 4. If creation is allowed, use the first candidate path
         if create_if_missing and candidates:
             first_candidate = candidates[0]
             Path(first_candidate).mkdir(parents=True, exist_ok=True)
@@ -303,20 +303,20 @@ class PathConfig:
         additional_candidates: List[str]
     ) -> Optional[str]:
         """
-        解析 Blender 可执行文件路径
+        Resolve the Blender executable path
         
         Args:
-            config_value: 配置文件中的值
-            additional_candidates: 额外的候选路径
+            config_value: Value from the configuration file
+            additional_candidates: Additional candidate paths
             
         Returns:
-            Blender 可执行文件路径，如果都不存在则返回 None
+            Blender executable path, or None if none exist
         """
-        # 1. 配置文件值
+        # 1. Config file value
         if config_value and os.path.exists(config_value):
             return config_value
         
-        # 2. 环境变量
+        # 2. Environment variable
         env_value = os.environ.get('BLENDER_EXECUTABLE')
         if env_value and os.path.exists(env_value):
             return env_value
@@ -330,7 +330,7 @@ class PathConfig:
         except Exception:
             pass
         
-        # 4. 候选路径链
+        # 4. Candidate path chain
         all_candidates = additional_candidates + self._BLENDER_CANDIDATES
         for candidate in all_candidates:
             if os.path.exists(candidate):
@@ -338,14 +338,14 @@ class PathConfig:
         
         return None
     
-    # ========== 便捷方法 ==========
+    # ========== Convenience Methods ==========
     
     def get_objaverse_paths(self) -> Dict[str, str]:
         """
-        获取 Objaverse 相关的所有路径（兼容 objaverse_retriever.py 的 _get_objathor_paths）
+        Get all Objaverse-related paths (compatible with _get_objathor_paths in objaverse_retriever.py)
         
         Returns:
-            包含所有 Objaverse 路径的字典
+            Dictionary containing all Objaverse paths
         """
         base_dir = self.objaverse_base_dir or ""
         versioned_dir = os.path.join(base_dir, self.objaverse_assets_version) if base_dir else ""
@@ -363,18 +363,18 @@ class PathConfig:
     
     def get_glb_cache_dirs(self) -> List[str]:
         """
-        获取 GLB 缓存目录列表（用于搜索）
+        Get the list of GLB cache directories (for searching)
         
         Returns:
-            可用的 GLB 缓存目录列表
+            List of available GLB cache directories
         """
         dirs = []
         
-        # 主缓存目录
+        # Primary cache directory
         if self.objaverse_glb_cache_dir and os.path.exists(self.objaverse_glb_cache_dir):
             dirs.append(self.objaverse_glb_cache_dir)
         
-        # 备选缓存目录
+        # Fallback cache directories
         fallback_dirs = [
             os.path.expanduser("~/.objaverse/hf-objaverse-v1/glbs"),
         ]
@@ -386,10 +386,10 @@ class PathConfig:
     
     def to_env_dict(self) -> Dict[str, str]:
         """
-        将配置转换为环境变量字典（用于子进程）
+        Convert configuration to an environment variable dictionary (for subprocesses)
         
         Returns:
-            环境变量字典
+            Environment variable dictionary
         """
         env = {}
         
@@ -432,7 +432,7 @@ class PathConfig:
         )
     
     def print_environment_info(self) -> None:
-        """打印环境检测信息和路径配置"""
+        """Print environment detection information and path configuration"""
         print(f"\n{'='*60}")
         print(f"PathConfig Environment Detection")
         print(f"{'='*60}")
@@ -448,18 +448,18 @@ class PathConfig:
         print(f"  Logs dir: {self.logs_dir}")
         print(f"{'='*60}\n")
     
-    # ========== 单例模式方法 ==========
+    # ========== Singleton Pattern Methods ==========
     
     @classmethod
     def init_from_config(cls, config: Dict[str, Any]) -> 'PathConfig':
         """
-        从配置字典初始化单例
+        Initialize the singleton from a configuration dictionary
         
         Args:
-            config: 配置字典（通常来自 SceneEditingInteraction 的 config）
+            config: Configuration dictionary (typically from SceneEditingInteraction's config)
             
         Returns:
-            PathConfig 实例
+            PathConfig instance
         """
         with cls._lock:
             cls._instance = cls(config)
@@ -469,20 +469,20 @@ class PathConfig:
     @classmethod
     def init_from_yaml(cls, yaml_path: str) -> 'PathConfig':
         """
-        从 YAML 文件初始化单例
+        Initialize the singleton from a YAML file
         
         Args:
-            yaml_path: YAML 配置文件路径
+            yaml_path: Path to the YAML configuration file
             
         Returns:
-            PathConfig 实例
+            PathConfig instance
         """
         import yaml
         
         with open(yaml_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
         
-        # 从 interaction 配置中提取 paths
+        # Extract paths from the interaction config
         if 'interaction' in config:
             for interaction in config['interaction']:
                 if 'config' in interaction:
@@ -493,13 +493,13 @@ class PathConfig:
     @classmethod
     def get_instance(cls, config: Optional[Dict[str, Any]] = None) -> 'PathConfig':
         """
-        获取单例实例，如果不存在则创建
+        Get the singleton instance, creating it if it does not exist
         
         Args:
-            config: 可选的配置字典
+            config: Optional configuration dictionary
             
         Returns:
-            PathConfig 实例
+            PathConfig instance
         """
         if cls._instance is None:
             with cls._lock:
@@ -510,45 +510,45 @@ class PathConfig:
     
     @classmethod
     def reset(cls):
-        """重置单例（用于测试）"""
+        """Reset the singleton (for testing)"""
         with cls._lock:
             cls._instance = None
 
 
-# ========== 便捷函数（向后兼容）==========
+# ========== Convenience Functions (backward compatible) ==========
 
 def get_objaverse_paths() -> Dict[str, str]:
     """
-    获取 Objaverse 路径（向后兼容 objaverse_retriever.py）
+    Get Objaverse paths (backward compatible with objaverse_retriever.py)
     """
     return PathConfig.get_instance().get_objaverse_paths()
 
 
 def get_objaverse_glb_cache_dir() -> Optional[str]:
     """
-    获取 Objaverse GLB 缓存目录
+    Get the Objaverse GLB cache directory
     """
     return PathConfig.get_instance().objaverse_glb_cache_dir
 
 
 def get_3dfuture_models_dir() -> Optional[str]:
     """
-    获取 3D-FUTURE 模型目录
+    Get the 3D-FUTURE model directory
     """
     return PathConfig.get_instance().future3d_models_dir
 
 
 def get_blender_executable() -> Optional[str]:
     """
-    获取 Blender 可执行文件路径
+    Get the Blender executable path
     """
     return PathConfig.get_instance().blender_executable
 
 
-# ========== 测试代码 ==========
+# ========== Test Code ==========
 
 if __name__ == "__main__":
-    # 测试自动初始化
+    # Test auto-initialization
     print("=== Testing PathConfig ===")
     
     config = PathConfig.get_instance()

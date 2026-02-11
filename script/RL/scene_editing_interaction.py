@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-SceneEditingInteraction - 场景编辑交互类
-用于VERL框架中的场景编辑强化学习任务
+SceneEditingInteraction - Scene Editing Interaction Class
+Used for scene editing reinforcement learning tasks in the VERL framework
 """
 
 import os
@@ -17,15 +17,15 @@ from typing import Dict, Any, List, Tuple, Optional
 from PIL import Image
 from io import BytesIO
 
-# 类级别的信号量（延迟初始化）
-# 不在模块级别创建，避免事件循环绑定问题
+# Class-level semaphore (lazy initialization)
+# Not created at module level to avoid event loop binding issues
 _RENDER_SEMAPHORE = None
 
-# 添加RL_utils所在路径
-# 更可靠的路径查找: 从当前文件向上找到项目根目录
+# Add path where RL_utils is located
+# More reliable path finding: navigate up from current file to project root
 current_file = Path(__file__).resolve()
-# 假设项目结构: llmscene/verl/verl/interactions/scene_editing_interaction.py
-# 向上4层到 llmscene，然后找 utils
+# Assumed project structure: llmscene/verl/verl/interactions/scene_editing_interaction.py
+# Go up 4 levels to llmscene, then find utils
 project_root = current_file.parent.parent.parent.parent
 utils_path = project_root / "utils"
 
@@ -33,20 +33,20 @@ if not utils_path.exists():
     raise RuntimeError(f"Utils path not found: {utils_path}")
 
 if str(utils_path) not in sys.path:
-    sys.path.insert(0, str(utils_path))  # 使用 insert(0) 优先使用这个路径
+    sys.path.insert(0, str(utils_path))  # Use insert(0) to prioritize this path
 
 from verl.interactions.base import BaseInteraction
 from RL_utils import edit_and_render_scene, VoxelReward, TrimeshPhysicsMetrics, convert_flat_to_grouped, convert_grouped_to_flat, generate_physics_feedback
 
-# 导入Objaverse资产元数据获取函数
+# Import Objaverse asset metadata retrieval functions
 try:
     from objaverse_retriever import get_bbox_dims as objaverse_get_bbox_dims, ObjaverseRetriever
 except ImportError:
     objaverse_get_bbox_dims = None
     ObjaverseRetriever = None
 
-# 定义各房间类型的必备基础物体（如果缺少这些物体，直接评分-1）
-# 注意：key 使用标准化名称，matching_patterns 用于从用户输入中匹配
+# Define essential base objects for each room type (if these objects are missing, score is directly -1)
+# Note: keys use standardized names, matching_patterns are used to match from user input
 ROOM_TYPE_ESSENTIAL_OBJECTS = {
     "bedroom": {
         "essential": ["bed", "wardrobe", "nightstand"],
@@ -85,7 +85,7 @@ ROOM_TYPE_ESSENTIAL_OBJECTS = {
         }
     },
     "gym": {
-        "essential": ["treadmill", "weight_equipment"],  # 大型健身器械是必备的，哑铃太小不算
+        "essential": ["treadmill", "weight_equipment"],  # Large gym equipment is essential; dumbbells are too small to count
         "matching_patterns": ["gym", "fitness room", "fitnessroom", "workout room", "exercise room", "home gym"],
         "aliases": {
             "treadmill": ["treadmill", "running machine", "exercise bike", "elliptical", "stationary bike", "rowing machine"],
@@ -101,30 +101,30 @@ ROOM_TYPE_ESSENTIAL_OBJECTS = {
             "sideboard": ["sideboard", "buffet", "credenza", "cabinet"]
         }
     },
-    # 娱乐室类型多样（音乐室、桌游室、台球室、电子游戏室等），无法定义统一的必备物体
-    # 交由VLM根据用户需求动态判断
+    # Entertainment rooms vary widely (music room, board game room, billiard room, video game room, etc.), cannot define uniform essential objects
+    # Delegate to VLM to judge dynamically based on user requirements
     "entertainment room": {
-        "essential": [],  # 不设固定必备物体，由VLM动态判断
+        "essential": [],  # No fixed essential objects, VLM judges dynamically
         "matching_patterns": [
-            # 通用娱乐室
+            # General entertainment room
             "entertainment room", "entertainmentroom", "entertainment", 
             "game room", "gameroom", "gaming room",
             "recreation room", "rec room", "play room", "playroom",
-            # 家庭影院
+            # Home theater
             "home theater", "home theatre", "home cinema", "theater room", "theatre room",
             "cinema room", "movie room", "media room",
-            # 音乐相关
+            # Music related
             "music room", "musicroom", "ktv", "karaoke room", "karaoke",
             "piano room", "studio",
-            # 球类运动
+            # Ball sports
             "billiard room", "billiards room", "pool room", "snooker room",
             "ping pong room", "pingpong room", "table tennis room",
-            # 桌游
+            # Board games
             "board game room", "boardgame room", "card room", "poker room",
             "mahjong room", "chess room",
-            # 电子游戏
+            # Video games
             "video game room", "videogame room", "arcade room", "esports room",
-            # 其他
+            # Other
             "bar room", "lounge room", "party room"
         ],
         "aliases": {}
@@ -134,20 +134,20 @@ ROOM_TYPE_ESSENTIAL_OBJECTS = {
 
 def match_room_type(user_input: str) -> Optional[str]:
     """
-    从用户输入中匹配房间类型
+    Match room type from user input
     
-    参数:
-        user_input: 用户需求描述或房间类型字符串
+    Args:
+        user_input: User requirement description or room type string
         
-    返回:
-        匹配到的标准房间类型名称，或 None
+    Returns:
+        Matched standard room type name, or None
     """
     if not user_input:
         return None
     
     user_input_lower = user_input.lower().strip()
     
-    # 遍历所有房间类型，检查 matching_patterns
+    # Iterate over all room types, check matching_patterns
     for room_type, config in ROOM_TYPE_ESSENTIAL_OBJECTS.items():
         patterns = config.get("matching_patterns", [room_type])
         for pattern in patterns:
@@ -159,19 +159,19 @@ def match_room_type(user_input: str) -> Optional[str]:
 
 class SceneEditingInteraction(BaseInteraction):
     """
-    场景编辑交互类
+    Scene Editing Interaction Class
     
-    处理场景编辑任务的交互流程，包括：
-    1. 解析LLM输出的tool_calls
-    2. 调用场景编辑和渲染
-    3. 计算基于体素评估的物理奖励
-    4. 管理多轮交互状态
-    5. 使用VLM judge进行场景质量评估
+    Handles the interaction flow for scene editing tasks, including:
+    1. Parsing tool_calls from LLM output
+    2. Invoking scene editing and rendering
+    3. Computing physics rewards based on voxel evaluation
+    4. Managing multi-turn interaction state
+    5. Using VLM judge for scene quality evaluation
     """
     
     @staticmethod
     def extract_create_scene_from_response(response_text: str) -> Optional[Dict[str, Any]]:
-        """从模型响应中提取<create_scene>内容"""
+        """Extract <create_scene> content from model response"""
         import re
         pattern = r'<create_scene>\s*```json\s*(.*?)\s*```\s*</create_scene>'
         match = re.search(pattern, response_text, re.DOTALL)
@@ -189,14 +189,14 @@ class SceneEditingInteraction(BaseInteraction):
     
     @staticmethod
     def image_to_base64(image_path: str) -> str:
-        """将图像文件转换为base64字符串"""
+        """Convert image file to base64 string"""
         with open(image_path, 'rb') as f:
             img_data = f.read()
         return f"data:image/png;base64,{base64.b64encode(img_data).decode()}"
     
     @staticmethod
     def extract_think_content(response_text: str) -> Optional[str]:
-        """从模型响应中提取<think>内容"""
+        """Extract <think> content from model response"""
         import re
         pattern = r'<think>(.*?)</think>'
         match = re.search(pattern, response_text, re.DOTALL)
@@ -206,19 +206,19 @@ class SceneEditingInteraction(BaseInteraction):
     
     def __init__(self, config: Dict[str, Any]):
         """
-        初始化场景编辑交互
+        Initialize scene editing interaction
         
-        参数:
-            config: 配置字典，包含以下键：
-                - max_turns: 最大交互轮数 (默认10)
-                - models_base_path: 3D模型基础路径
-                - voxel_size: 体素大小 (默认0.05)
-                - reward_threshold: PBL损失阈值 (默认1e-5)
-                - output_dir: 输出目录 (默认"./scene_editing_output")
-                - verbose: 是否输出详细日志 (默认False)
-                - paths: 统一路径配置块（可选）
+        Args:
+            config: Configuration dictionary containing the following keys:
+                - max_turns: Maximum number of interaction turns (default 10)
+                - models_base_path: Base path for 3D models
+                - voxel_size: Voxel size (default 0.05)
+                - reward_threshold: PBL loss threshold (default 1e-5)
+                - output_dir: Output directory (default "./scene_editing_output")
+                - verbose: Whether to output detailed logs (default False)
+                - paths: Unified path configuration block (optional)
         """
-        # ========== 初始化 PathConfig 单例（统一路径配置）==========
+        # ========== Initialize PathConfig singleton (unified path configuration) ==========
         try:
             from path_config import PathConfig
             path_config = PathConfig.init_from_config(config)
@@ -227,11 +227,11 @@ class SceneEditingInteraction(BaseInteraction):
             print(f"⚠ PathConfig initialization failed: {e}, using fallback paths")
             path_config = None
         
-        # 创建自定义日志文件
+        # Create custom log file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         pid = os.getpid()
         
-        # 优先使用 PathConfig，然后使用硬编码回退
+        # Prefer PathConfig, then use hardcoded fallback
         if path_config and path_config.logs_dir:
             log_dir = Path(path_config.logs_dir) / "interaction_logs"
         elif Path("/path/to/logs").exists():
@@ -243,15 +243,15 @@ class SceneEditingInteraction(BaseInteraction):
         self.log_file = log_dir / f"scene_editing_interaction_{timestamp}_pid{pid}.log"
         # self.log_file = Path(f"/path/to/data/logs/scene_editing_interaction_{timestamp}_pid{pid}.log")
 
-        # 设置日志记录器
+        # Set up logger
         self.logger = logging.getLogger(f"scene_editing_{timestamp}_{pid}")
         self.logger.setLevel(logging.DEBUG)
         
-        # 文件 handler
+        # File handler
         file_handler = logging.FileHandler(self.log_file, mode='a', encoding='utf-8')
         file_handler.setLevel(logging.DEBUG)
         
-        # 日志格式
+        # Log format
         formatter = logging.Formatter(
             '%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s',
             datefmt='%Y-%m-%d %H:%M:%S'
@@ -259,7 +259,7 @@ class SceneEditingInteraction(BaseInteraction):
         file_handler.setFormatter(formatter)
         self.logger.addHandler(file_handler)
         
-        # 记录初始化开始
+        # Log initialization start
         self.logger.info("="*80)
         self.logger.info(f"SceneEditingInteraction.__init__ called")
         self.logger.info(f"Log file: {self.log_file}")
@@ -268,7 +268,7 @@ class SceneEditingInteraction(BaseInteraction):
         if path_config:
             self.logger.info(f"PathConfig: {path_config}")
         
-        # 打印到控制台（可能被 Ray 捕获）
+        # Print to console (may be captured by Ray)
         print(f"✓ SceneEditingInteraction log file: {self.log_file}")
         
         super().__init__(config)
@@ -277,22 +277,22 @@ class SceneEditingInteraction(BaseInteraction):
         self.output_dir = Path(config.get("output_dir", "./scene_editing_output"))
         self.verbose = config.get("verbose", False)
         
-        # 物理评估模式：'voxel' 或 'trimesh'（默认使用trimesh）
+        # Physics evaluation mode: 'voxel' or 'trimesh' (default: trimesh)
         self.physics_mode = config.get("physics_mode", "trimesh")
         
-        # 资产来源配置：是否使用 Objaverse（默认 True，使用 Objaverse）
+        # Asset source configuration: whether to use Objaverse (default True, use Objaverse)
         self.use_objaverse = config.get("use_objaverse", True)
         
-        # VLM Judge 配置
+        # VLM Judge configuration
         self.vlm_judge_enabled = config.get("vlm_judge_enabled", True)
         self.vlm_judge_url = config.get("vlm_judge_url", "http://localhost:8000/v1/chat/completions")
         self.vlm_judge_model = config.get("vlm_judge_model", "Qwen/Qwen2.5-VL-72B-Instruct")
         self.vlm_judge_timeout = config.get("vlm_judge_timeout", 60)
         
-        # 信号量配置（限制并发渲染/重型任务的数量）
+        # Semaphore configuration (limit concurrent rendering/heavy tasks)
         self.semaphore_limit = config.get("semaphore_limit", 32)
         
-        # 反馈注入配置
+        # Feedback injection configuration
         feedback_config = config.get("feedback_injection", {})
         self.feedback_injection_enabled = feedback_config.get("enabled", True)
         self.physics_feedback_enabled = feedback_config.get("physics_feedback_enabled", True)
@@ -312,23 +312,23 @@ class SceneEditingInteraction(BaseInteraction):
             self.logger.info(f"vlm_judge_url: {self.vlm_judge_url}")
             self.logger.info(f"vlm_judge_model: {self.vlm_judge_model}")
         
-        # 初始化体素奖励计算器 - 优先使用 PathConfig
-        # 当使用 Objaverse 模式时，3D-FUTURE 路径是可选的
+        # Initialize voxel reward calculator - prefer PathConfig
+        # When using Objaverse mode, 3D-FUTURE path is optional
         models_base_path = None
         if path_config and path_config.future3d_models_dir:
             models_base_path = path_config.future3d_models_dir
             self.logger.info(f"Using PathConfig models_base_path: {models_base_path}")
         elif not self.use_objaverse:
-            # 只有在非 Objaverse 模式下才强制要求 3D-FUTURE 路径
+            # Only require 3D-FUTURE path in non-Objaverse mode
             models_base_path = "/path/to/datasets/3d-front/3D-FUTURE-model"
-            # 回退到本地路径
+            # Fallback to local path
             if not Path(models_base_path).exists():
                 alt_path = "/path/to/datasets/3d-front/3D-FUTURE-model"
                 if Path(alt_path).exists():
                     models_base_path = alt_path
                     self.logger.info(f"Using alternative models_base_path: {models_base_path}")
         else:
-            # Objaverse 模式：3D-FUTURE 路径可选，尝试查找但不强制
+            # Objaverse mode: 3D-FUTURE path is optional, try to find but don't enforce
             for candidate in [
                 "/path/to/datasets/3d-front/3D-FUTURE-model",
                 "/path/to/datasets/3d-front/3D-FUTURE-model"
@@ -340,7 +340,7 @@ class SceneEditingInteraction(BaseInteraction):
             if not models_base_path:
                 self.logger.info("3D-FUTURE path not found, using Objaverse-only mode")
         
-        # 根据physics_mode初始化对应的评估器
+        # Initialize the corresponding evaluator based on physics_mode
         if self.physics_mode == "voxel":
             self.logger.info(f"Initializing VoxelReward with models_base_path: {models_base_path}")
             
@@ -368,13 +368,13 @@ class SceneEditingInteraction(BaseInteraction):
         else:
             raise ValueError(f"Invalid physics_mode: {self.physics_mode}. Must be 'voxel' or 'trimesh'")
         
-        # 存储每个实例的状态
+        # Store state for each instance
         self._instance_dict = {}
         
-        # 支撑类型缓存：存储物体描述到支撑类型的映射，避免重复LLM调用
+        # Support type cache: stores mapping from object description to support type, avoiding repeated LLM calls
         self.support_type_cache = {}
         
-        # Objaverse资产数据库（延迟初始化，用于获取物体真实尺寸）
+        # Objaverse asset database (lazy initialization, for getting real object sizes)
         self._objaverse_retriever = None
         self._objaverse_database = None
         
@@ -389,13 +389,13 @@ class SceneEditingInteraction(BaseInteraction):
     
     async def _get_render_semaphore(self):
         """
-        获取渲染信号量（延迟初始化，避免在模块导入时绑定事件循环）
+        Get render semaphore (lazy initialization, avoids binding to event loop at module import time)
         
-        使用类级别的信号量，在第一次调用时创建。
-        这样可以确保信号量在正确的事件循环中创建。
+        Uses a class-level semaphore, created on first call.
+        This ensures the semaphore is created in the correct event loop.
         
         Returns:
-            asyncio.Semaphore 实例
+            asyncio.Semaphore instance
         """
         global _RENDER_SEMAPHORE
         if _RENDER_SEMAPHORE is None:
@@ -405,10 +405,10 @@ class SceneEditingInteraction(BaseInteraction):
     
     def _get_objaverse_database(self) -> Optional[Dict]:
         """
-        获取Objaverse资产数据库（延迟初始化）
+        Get Objaverse asset database (lazy initialization)
         
         Returns:
-            资产数据库字典，或None（如果加载失败）
+            Asset database dictionary, or None (if loading failed)
         """
         if self._objaverse_database is not None:
             return self._objaverse_database
@@ -429,16 +429,16 @@ class SceneEditingInteraction(BaseInteraction):
     
     def _get_asset_real_size(self, uid: str) -> Optional[Dict[str, float]]:
         """
-        通过资产ID获取物体的真实尺寸（仿照 Holodeck 的 get_bbox_dims 方法）
+        Get real size of an object by asset ID (following Holodeck's get_bbox_dims method)
         
-        数据路径：annotations[uid]["thor_metadata"]["assetMetadata"]["boundingBox"]
-        boundingBox 格式：{min: {x, y, z}, max: {x, y, z}}
+        Data path: annotations[uid]["thor_metadata"]["assetMetadata"]["boundingBox"]
+        boundingBox format: {min: {x, y, z}, max: {x, y, z}}
         
-        参数:
-            uid: Objaverse资产UID
+        Args:
+            uid: Objaverse asset UID
             
-        返回:
-            包含 x, y, z 尺寸的字典（单位：米），或None（如果失败）
+        Returns:
+            Dictionary containing x, y, z dimensions (unit: meters), or None (if failed)
         """
         if not uid:
             return None
@@ -450,7 +450,7 @@ class SceneEditingInteraction(BaseInteraction):
         try:
             obj_data = database[uid]
             
-            # 获取 assetMetadata（仿照 Holodeck 的 get_asset_metadata）
+            # Get assetMetadata (following Holodeck's get_asset_metadata)
             if "assetMetadata" in obj_data:
                 asset_metadata = obj_data["assetMetadata"]
             elif "thor_metadata" in obj_data:
@@ -463,7 +463,7 @@ class SceneEditingInteraction(BaseInteraction):
                 self.logger.debug(f"No boundingBox in assetMetadata for uid {uid}")
                 return None
             
-            # 获取 boundingBox 尺寸（仿照 Holodeck 的 get_bbox_dims）
+            # Get boundingBox dimensions (following Holodeck's get_bbox_dims)
             bbox_info = asset_metadata["boundingBox"]
             
             if "x" in bbox_info:
@@ -471,7 +471,7 @@ class SceneEditingInteraction(BaseInteraction):
             if "size" in bbox_info:
                 return bbox_info["size"]
             
-            # 从 min/max 计算尺寸
+            # Calculate dimensions from min/max
             mins = bbox_info["min"]
             maxs = bbox_info["max"]
             return {k: maxs[k] - mins[k] for k in ["x", "y", "z"]}
@@ -489,18 +489,18 @@ class SceneEditingInteraction(BaseInteraction):
         return_text: bool = False
     ) -> Optional[float] | Optional[str]:
         """
-        调用VLM judge进行评分或获取文本响应
+        Call VLM judge for scoring or getting text response
         
-        参数:
-            image_path: 渲染图像路径
-            prompt: 评分提示
-            max_retries: 最大重试次数
-            max_tokens: 最大生成token数（评分用50，分析/描述用更大值）
-            return_text: 如果为True，返回原始文本而非解析评分
+        Args:
+            image_path: Rendered image path
+            prompt: Scoring prompt
+            max_retries: Maximum number of retries
+            max_tokens: Maximum generation tokens (50 for scoring, larger values for analysis/description)
+            return_text: If True, return raw text instead of parsed score
             
-        返回:
-            如果return_text=False: 评分 (-1.0, -0.5, 0.0, 0.5, 1.0) 或 None（如果失败）
-            如果return_text=True: 原始文本响应 或 None（如果失败）
+        Returns:
+            If return_text=False: Score (-1.0, -0.5, 0.0, 0.5, 1.0) or None (if failed)
+            If return_text=True: Raw text response or None (if failed)
         """
         if not self.vlm_judge_enabled:
             self.logger.info("VLM judge disabled, skipping")
@@ -510,14 +510,14 @@ class SceneEditingInteraction(BaseInteraction):
             self.logger.error(f"Image not found: {image_path}")
             return None
         
-        # 将图像转换为base64
+        # Convert image to base64
         try:
             img_base64 = self.image_to_base64(image_path)
         except Exception as e:
             self.logger.error(f"Failed to convert image to base64: {e}")
             return None
         
-        # 构建请求
+        # Build request
         data = {
             "model": self.vlm_judge_model,
             "messages": [
@@ -538,7 +538,7 @@ class SceneEditingInteraction(BaseInteraction):
             "temperature": 0.1
         }
         
-        # 重试逻辑
+        # Retry logic
         for attempt in range(max_retries):
             try:
                 response = await asyncio.to_thread(
@@ -552,20 +552,20 @@ class SceneEditingInteraction(BaseInteraction):
                     result = response.json()
                     content = result['choices'][0]['message']['content']
                     
-                    # 如果需要返回文本，直接返回
+                    # If text return is needed, return directly
                     if return_text:
                         self.logger.info(f"VLM judge text response (first 200 chars): {content[:200]}...")
                         return content
                     
-                    # 解析评分（支持5级评分：-1.0, -0.5, 0.0, 0.5, 1.0）
+                    # Parse score (supports 5-level scoring: -1.0, -0.5, 0.0, 0.5, 1.0)
                     import re
-                    # 首先尝试匹配带小数的分数
+                    # First try to match decimal scores
                     match = re.search(r'(-?[01])\.([05])', content)
                     if match:
                         score = float(f"{match.group(1)}.{match.group(2)}")
                         self.logger.info(f"VLM judge score: {score}, response: {content}")
                         return score
-                    # 如果没有小数，尝试匹配整数
+                    # If no decimal, try matching integers
                     match = re.search(r'(-1|0|1)', content)
                     if match:
                         score = float(match.group(1))
@@ -580,7 +580,7 @@ class SceneEditingInteraction(BaseInteraction):
             except Exception as e:
                 self.logger.warning(f"VLM judge attempt {attempt+1}/{max_retries} failed: {e}")
                 if attempt < max_retries - 1:
-                    await asyncio.sleep(1)  # 等待1秒后重试
+                    await asyncio.sleep(1)  # Wait 1 second before retrying
         
         self.logger.error("VLM judge failed after all retries")
         return None
@@ -592,15 +592,15 @@ class SceneEditingInteraction(BaseInteraction):
         user_requirement: str
     ) -> Optional[str]:
         """
-        第一阶段：让VLM独立分析场景中存在的问题（用于中间轮次）
+        Phase 1: Let VLM independently analyze problems in the scene (used for intermediate turns)
         
-        参数:
-            image_path: 渲染图路径
-            scene_json_str: 场景JSON字符串
-            user_requirement: 用户需求
+        Args:
+            image_path: Rendered image path
+            scene_json_str: Scene JSON string
+            user_requirement: User requirement
             
-        返回:
-            VLM识别的问题列表文本，或None（如果失败）
+        Returns:
+            Text listing problems identified by VLM, or None (if failed)
         """
         prompt_analyze = f"""You are a highly critical interior design expert. Carefully examine this scene rendering (left: top view, right: diagonal view).
 
@@ -621,21 +621,21 @@ Examine the scene carefully and identify problems in these THREE categories:
 
 ## Problem Categories:
 
-**1. Physical Bugs (物理类问题)**:
+**1. Physical Bugs (Physical Issues)**:
 - Object Overlap/Collision: Two or more objects occupying the same space (check bboxes intersecting in TOP VIEW)
 - Out of Bounds: Objects extending beyond room boundaries (check bboxes vs floor grid)
 - Floating Objects: Objects not properly supported (check DIAGONAL VIEW)
 - Example: "PHYSICAL: The coffee table bbox overlaps with sofa bbox by approximately 0.3m"
 - Example: "PHYSICAL: The wardrobe extends 0.5m beyond the north wall boundary"
 
-**2. Layout Rationality Bugs (场景合理性问题)**:
+**2. Layout Rationality Bugs (Scene Rationality Issues)**:
 - Core Furniture Misplacement: Bed/sofa not against wall, in room center
 - Missing Essential Items: Room lacks core furniture for its type (bedroom needs bed, living room needs sofa)
 - Improper Orientation: Furniture facing wrong direction (sofa facing wall instead of TV area)
 - Example: "RATIONALITY: The bed is placed in the center of the room, not against any wall"
 - Example: "RATIONALITY: The sofa is facing the corner wall instead of the open area"
 
-**3. Spatial Distribution Bugs (空间分布问题)**:
+**3. Spatial Distribution Bugs (Spatial Distribution Issues)**:
 - Clustering: All furniture crowded in one corner/side of the room
 - Large Empty Areas: More than 40% of room completely empty
 - Unbalanced Layout: One half crowded, other half empty
@@ -672,14 +672,14 @@ If a category has no problems, write "[CATEGORY]: No issues found"
         user_requirement: str
     ) -> str:
         """
-        生成简短的VLM布局反馈（不包含物理碰撞/出界问题，这些由trimesh处理）
+        Generate brief VLM layout feedback (excluding collision/out-of-bounds issues, which are handled by trimesh)
         
-        参数:
-            image_path: 渲染图路径
-            user_requirement: 用户需求
+        Args:
+            image_path: Rendered image path
+            user_requirement: User requirement
             
-        返回:
-            简短的布局反馈文本，如果没有问题或失败则返回空字符串
+        Returns:
+            Brief layout feedback text, or empty string if no issues or failed
         """
         prompt_layout_feedback = f"""You are an interior design expert. Analyze this room rendering (left: top view, right: diagonal view).
 
@@ -712,9 +712,9 @@ Example outputs:
             )
             
             if result:
-                # 清理结果，确保简洁
+                # Clean result, ensure concise
                 result = result.strip()
-                # 如果VLM返回"no issues"类似的内容，返回空字符串
+                # If VLM returns "no issues" or similar content, return empty string
                 if any(phrase in result.lower() for phrase in ["no issue", "looks good", "well-designed", "properly placed"]):
                     return ""
                 return result
@@ -725,13 +725,13 @@ Example outputs:
     
     def _extract_tool_calls_from_messages(self, messages: List[Dict]) -> List[Dict]:
         """
-        从消息历史中提取最新的工具调用列表
+        Extract the latest tool call list from message history
         
-        参数:
-            messages: 消息列表
+        Args:
+            messages: Message list
             
-        返回:
-            工具调用列表，每个元素包含 name 和 arguments
+        Returns:
+            Tool call list, each element containing name and arguments
         """
         import re
         for msg in reversed(messages):
@@ -757,20 +757,20 @@ Example outputs:
         room_type: str = ""
     ) -> Dict[str, Any]:
         """
-        评估本轮add/replace的新物体是否与场景需求相关
+        Evaluate whether new objects added/replaced in this turn are relevant to the scene requirements
         
-        只针对add_object和replace_object操作中的新物体进行评估
+        Only evaluates new objects in add_object and replace_object operations
         
-        参数:
-            tool_calls: 工具调用列表
-            user_requirement: 用户需求描述
-            room_type: 房间类型
+        Args:
+            tool_calls: Tool call list
+            user_requirement: User requirement description
+            room_type: Room type
             
-        返回:
-            包含评分和详细信息的字典：
-            - score: 评分 (1.0, 0.0, -1.0)
-            - relevant_objects: 相关物体列表
-            - irrelevant_objects: 无关物体列表
+        Returns:
+            Dictionary containing score and details:
+            - score: Score (1.0, 0.0, -1.0)
+            - relevant_objects: List of relevant objects
+            - irrelevant_objects: List of irrelevant objects
         """
         result = {
             "score": 0.0,
@@ -781,7 +781,7 @@ Example outputs:
         if not self.vlm_judge_enabled:
             return result
         
-        # 提取add_object和replace_object中的新物体描述
+        # Extract new object descriptions from add_object and replace_object
         new_objects = []
         for tool_call in tool_calls:
             name = tool_call.get("name", "")
@@ -797,7 +797,7 @@ Example outputs:
                     new_objects.append(new_desc)
         
         if not new_objects:
-            # 没有add/replace操作，返回中性分数
+            # No add/replace operations, return neutral score
             return result
         
         new_objects_str = "\n".join([f"- {obj}" for obj in new_objects])
@@ -856,7 +856,7 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             response_json = response.json()
             content = response_json['choices'][0]['message']['content']
             
-            # 解析JSON响应
+            # Parse JSON response
             import re
             json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
             if json_match:
@@ -870,19 +870,19 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             result["relevant_objects"] = relevant
             result["irrelevant_objects"] = irrelevant
             
-            # 计算评分
+            # Calculate score
             total = len(new_objects)
             irrelevant_count = len(irrelevant)
             
             if irrelevant_count == 0:
-                # 全部相关
+                # All relevant
                 result["score"] = 1.0
             elif irrelevant_count >= total:
-                # 全部无关
+                # All irrelevant
                 result["score"] = -1.0
             else:
-                # 部分相关：根据比例计算
-                # 无关比例 > 50% 则负分，否则正分
+                # Partially relevant: calculate based on ratio
+                # If irrelevant ratio > 50%, negative score; otherwise positive score
                 irrelevant_ratio = irrelevant_count / total
                 if irrelevant_ratio > 0.5:
                     result["score"] = -0.5
@@ -904,46 +904,46 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
         user_requirement: str
     ) -> Dict[str, Any]:
         """
-        评估场景中物体的尺寸和比例是否合理（程序化评估，使用资产真实尺寸）
+        Evaluate whether object sizes and proportions in the scene are reasonable (programmatic evaluation using real asset sizes)
         
-        通过资产ID获取真实尺寸，与常见物体的合理尺寸范围进行比较
+        Retrieves real sizes via asset ID and compares with reasonable size ranges for common objects
         
-        参数:
-            image_path: 渲染图路径（保留参数但不使用，因为改为程序化评估）
-            scene_data: 场景JSON数据
-            user_requirement: 用户需求（保留参数但不使用）
+        Args:
+            image_path: Rendered image path (parameter preserved but unused, as evaluation is now programmatic)
+            scene_data: Scene JSON data
+            user_requirement: User requirement (parameter preserved but unused)
             
-        返回:
-            包含评分和详细信息的字典：
-            - score: 评分 (-1.0, -0.5, 0.0, 0.5, 1.0)
-            - issues: 发现的尺寸/比例问题列表
+        Returns:
+            Dictionary containing score and details:
+            - score: Score (-1.0, -0.5, 0.0, 0.5, 1.0)
+            - issues: List of size/proportion issues found
         """
         result = {
-            "score": 1.0,  # 默认满分，有问题时扣分
+            "score": 1.0,  # Default full score, deducted when issues found
             "issues": []
         }
         
-        # 定义各类物体的合理尺寸范围（单位：米）
-        # 格式：关键词 -> (min_width, max_width, min_height, max_height, min_depth, max_depth)
+        # Define reasonable size ranges for various object types (unit: meters)
+        # Format: keyword -> (min_width, max_width, min_height, max_height, min_depth, max_depth)
         SIZE_STANDARDS = {
-            # 床类
+            # Beds
             "bed": (1.2, 2.5, 0.3, 0.8, 1.8, 2.2),
             "double bed": (1.4, 2.2, 0.3, 0.8, 1.9, 2.2),
             "single bed": (0.9, 1.2, 0.3, 0.8, 1.8, 2.1),
-            # 座椅类
+            # Seating
             "sofa": (1.5, 3.5, 0.6, 1.2, 0.7, 1.2),
             "couch": (1.5, 3.5, 0.6, 1.2, 0.7, 1.2),
             "chair": (0.4, 0.7, 0.7, 1.2, 0.4, 0.7),
             "office chair": (0.5, 0.8, 0.9, 1.3, 0.5, 0.7),
             "armchair": (0.6, 1.0, 0.7, 1.1, 0.6, 1.0),
-            # 桌类
+            # Tables
             "desk": (0.8, 2.0, 0.7, 0.85, 0.5, 0.9),
             "table": (0.6, 2.5, 0.4, 0.9, 0.6, 1.5),
             "coffee table": (0.6, 1.5, 0.3, 0.6, 0.4, 1.0),
             "dining table": (0.8, 2.5, 0.7, 0.85, 0.8, 1.5),
             "nightstand": (0.35, 0.6, 0.4, 0.7, 0.35, 0.55),
             "bedside table": (0.35, 0.6, 0.4, 0.7, 0.35, 0.55),
-            # 柜类
+            # Cabinets/Storage
             "wardrobe": (0.8, 2.5, 1.8, 2.5, 0.5, 0.7),
             "closet": (0.8, 2.5, 1.8, 2.5, 0.5, 0.7),
             "cabinet": (0.4, 1.5, 0.6, 2.2, 0.3, 0.7),
@@ -951,12 +951,12 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             "bookcase": (0.6, 1.5, 1.2, 2.2, 0.25, 0.45),
             "tv stand": (0.8, 2.0, 0.4, 0.7, 0.35, 0.55),
             "sideboard": (1.0, 2.2, 0.7, 1.0, 0.4, 0.6),
-            # 健身器材
+            # Gym equipment
             "treadmill": (0.7, 1.0, 1.2, 1.6, 1.5, 2.2),
             "exercise bike": (0.5, 0.7, 1.0, 1.5, 1.0, 1.5),
             "weight bench": (0.5, 0.8, 0.4, 0.6, 1.2, 1.8),
             "power rack": (1.0, 1.5, 2.0, 2.5, 1.2, 1.8),
-            # 其他
+            # Others
             "lamp": (0.15, 0.5, 0.3, 1.8, 0.15, 0.5),
             "floor lamp": (0.25, 0.5, 1.2, 1.9, 0.25, 0.5),
             "tv": (0.8, 2.0, 0.5, 1.2, 0.05, 0.2),
@@ -965,24 +965,24 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             "plant": (0.2, 0.8, 0.3, 2.0, 0.2, 0.8),
         }
         
-        # 提取所有物体的尺寸信息
+        # Extract size information for all objects
         objects_info = []
         
         def extract_object_info(obj):
-            """从单个物体中提取尺寸信息，优先使用资产真实尺寸"""
+            """Extract size info from a single object, preferring real asset sizes"""
             desc = obj.get('desc', obj.get('object_description', 'unknown'))
             specified_size = obj.get('size', [1, 1, 1])
             uid = obj.get('uid', None)
             
-            # 优先通过 uid 从数据库查询真实尺寸（ground truth）
-            # retrieved_size 可能是归一化后的 [1,1,1]，不可靠
+            # Prefer looking up real size from database via uid (ground truth)
+            # retrieved_size may be normalized to [1,1,1], unreliable
             real_size = None
             size_source = "specified"
             
             if uid:
                 real_bbox = self._get_asset_real_size(uid)
                 if real_bbox:
-                    # 检查是否是有效的真实尺寸（非默认值）
+                    # Check if it's a valid real size (not default value)
                     x, y, z = real_bbox.get('x', 1.0), real_bbox.get('y', 1.0), real_bbox.get('z', 1.0)
                     if not (x == 1.0 and y == 1.0 and z == 1.0):
                         real_size = [x, y, z]
@@ -1012,18 +1012,18 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
         if not objects_info:
             return result
         
-        # 程序化检查每个物体的尺寸
-        critical_issues = 0  # 严重问题数量
-        minor_issues = 0     # 轻微问题数量
+        # Programmatic check of each object's size
+        critical_issues = 0  # Number of critical issues
+        minor_issues = 0     # Number of minor issues
         
         for obj_info in objects_info:
             desc = obj_info['desc'].lower()
             size = obj_info['size']  # [width, height, depth]
             
-            # 只有当尺寸来源是 "specified"（用户指定）时，才需要用标准范围检查
-            # 如果尺寸来自 "ground_truth"（retrieved_size 或 uid 查询），直接信任
+            # Only check with standard ranges when size source is "specified" (user-specified)
+            # If size comes from "ground_truth" (retrieved_size or uid query), trust it directly
             if obj_info['size_source'] == "specified":
-                # 尝试匹配物体类型
+                # Try to match object type
                 matched_standard = None
                 for keyword, standard in SIZE_STANDARDS.items():
                     if keyword in desc:
@@ -1036,21 +1036,21 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
                     
                     issues_for_obj = []
                     
-                    # 检查宽度
-                    if w < min_w * 0.5:  # 太小（低于最小值的50%）
+                    # Check width
+                    if w < min_w * 0.5:  # Too small (below 50% of minimum)
                         issues_for_obj.append(f"width {w:.2f}m is too small (expected {min_w:.1f}-{max_w:.1f}m)")
                         critical_issues += 1
-                    elif w < min_w * 0.8:  # 略小
+                    elif w < min_w * 0.8:  # Slightly small
                         issues_for_obj.append(f"width {w:.2f}m is slightly small")
                         minor_issues += 1
-                    elif w > max_w * 2.0:  # 太大
+                    elif w > max_w * 2.0:  # Too large
                         issues_for_obj.append(f"width {w:.2f}m is too large (expected {min_w:.1f}-{max_w:.1f}m)")
                         critical_issues += 1
-                    elif w > max_w * 1.3:  # 略大
+                    elif w > max_w * 1.3:  # Slightly large
                         issues_for_obj.append(f"width {w:.2f}m is slightly large")
                         minor_issues += 1
                     
-                    # 检查高度
+                    # Check height
                     if h < min_h * 0.5:
                         issues_for_obj.append(f"height {h:.2f}m is too small (expected {min_h:.1f}-{max_h:.1f}m)")
                         critical_issues += 1
@@ -1062,7 +1062,7 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
                     elif h > max_h * 1.3:
                         minor_issues += 1
                     
-                    # 检查深度
+                    # Check depth
                     if d < min_d * 0.5:
                         issues_for_obj.append(f"depth {d:.2f}m is too small (expected {min_d:.1f}-{max_d:.1f}m)")
                         critical_issues += 1
@@ -1073,33 +1073,33 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
                     if issues_for_obj:
                         result["issues"].append(f"{obj_info['desc']}: {'; '.join(issues_for_obj)}")
             else:
-                # 尺寸来自资产数据库，是真实尺寸，记录为已验证
+                # Size comes from asset database, is real size, logged as verified
                 self.logger.debug(f"Object '{obj_info['desc']}' has verified size from {obj_info['size_source']}: {size}")
             
-            # 检查用户指定尺寸与资产真实尺寸的差异（仅当有真实尺寸时）
+            # Check difference between user-specified size and real asset size (only when real size is available)
             if obj_info['size_source'] != "specified":
                 specified = obj_info['specified_size']
                 real = obj_info['size']
-                if specified != [1, 1, 1]:  # 非默认值
+                if specified != [1, 1, 1]:  # Non-default value
                     diff_ratio = max(
                         abs(specified[0] - real[0]) / max(real[0], 0.01),
                         abs(specified[1] - real[1]) / max(real[1], 0.01),
                         abs(specified[2] - real[2]) / max(real[2], 0.01)
                     )
-                    if diff_ratio > 1.0:  # 超过100%的差异
+                    if diff_ratio > 1.0:  # Over 100% difference
                         result["issues"].append(
                             f"{obj_info['desc']}: user specified size {[round(s,2) for s in specified]} differs greatly "
                             f"from real asset size {[round(s,2) for s in real]} (ground truth)"
                         )
                         critical_issues += 1
-                    elif diff_ratio > 0.5:  # 超过50%的差异
+                    elif diff_ratio > 0.5:  # Over 50% difference
                         result["issues"].append(
                             f"{obj_info['desc']}: user specified size {[round(s,2) for s in specified]} differs "
                             f"from real asset size {[round(s,2) for s in real]} (ground truth)"
                         )
                         minor_issues += 1
         
-        # 根据问题数量计算评分
+        # Calculate score based on number of issues
         if critical_issues >= 3:
             result["score"] = -1.0
         elif critical_issues >= 2:
@@ -1127,27 +1127,27 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
         instance_id: str = None
     ) -> Dict[str, Any]:
         """
-        从用户需求中提取关键物体并评估场景是否包含这些物体
+        Extract key objects from user requirements and evaluate whether the scene contains them
         
-        步骤:
-        1. 根据房间类型和用户指令，让VLM提取3-5个关键物体和1个最关键的物体（仅首次调用，后续使用缓存）
-        2. 让VLM判断当前场景是否包含这些物体
-        3. 返回评分和详细信息
+        Steps:
+        1. Based on room type and user instructions, let VLM extract 3-5 key objects and 1 most critical object (only on first call, cached afterwards)
+        2. Let VLM determine whether the current scene contains these objects
+        3. Return score and details
         
-        参数:
-            image_path: 渲染图路径
-            scene_summary: 场景物体摘要（由_extract_objects_summary提取）
-            user_requirement: 用户需求描述
-            room_type: 房间类型（如bedroom, living room等）
-            instance_id: 实例ID，用于缓存关键物体列表
+        Args:
+            image_path: Rendered image path
+            scene_summary: Scene object summary (extracted by _extract_objects_summary)
+            user_requirement: User requirement description
+            room_type: Room type (e.g., bedroom, living room, etc.)
+            instance_id: Instance ID, used for caching key objects list
             
-        返回:
-            包含评分和详细信息的字典：
-            - score: 评分 (1.0, 0.0, -1.0)
-            - key_objects: 关键物体列表
-            - most_critical_object: 最关键的物体
-            - found_objects: 在场景中找到的物体列表
-            - missing_objects: 在场景中缺失的物体列表
+        Returns:
+            Dictionary containing score and details:
+            - score: Score (1.0, 0.0, -1.0)
+            - key_objects: Key objects list
+            - most_critical_object: Most critical object
+            - found_objects: Objects found in the scene
+            - missing_objects: Objects missing from the scene
         """
         result = {
             "score": 0.0,
@@ -1155,32 +1155,32 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             "most_critical_object": "",
             "found_objects": [],
             "missing_objects": [],
-            "essential_objects_missing": [],  # 新增：缺失的基础必备物体
-            "essential_objects_found": []     # 新增：找到的基础必备物体
+            "essential_objects_missing": [],  # New: missing essential base objects
+            "essential_objects_found": []     # New: found essential base objects
         }
         
         if not self.vlm_judge_enabled:
             self.logger.info("VLM judge disabled, skipping key objects evaluation")
             return result
         
-        # ========== 新增：检查房间类型的基础必备物体 ==========
-        # 标准化房间类型（使用 match_room_type 函数增强匹配）
+        # ========== New: Check essential base objects for room type ==========
+        # Standardize room type (enhanced matching using match_room_type function)
         normalized_room_type = ""
         
-        # 首先尝试从传入的 room_type 参数匹配
+        # First try to match from the passed room_type parameter
         if room_type:
             normalized_room_type = match_room_type(room_type) or ""
         
-        # 如果没有匹配到，尝试从用户需求中推断房间类型
+        # If no match, try to infer room type from user requirement
         if not normalized_room_type:
             normalized_room_type = match_room_type(user_requirement) or ""
         
-        # 获取该房间类型的基础物体定义
+        # Get the essential objects definition for this room type
         essential_config = ROOM_TYPE_ESSENTIAL_OBJECTS.get(normalized_room_type, None)
         
         self.logger.info(f"Room type: '{normalized_room_type}', essential config: {essential_config is not None}")
         
-        # 第一步：检查缓存，如果有缓存则直接使用
+        # Step 1: Check cache, use cached data if available
         most_critical = None
         key_objects = None
         
@@ -1196,7 +1196,7 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
                 result["key_objects"] = key_objects
                 self.logger.info(f"Using cached key objects: {key_objects}, most critical: {most_critical}")
         
-        # 如果没有缓存，调用VLM提取关键物体
+        # If no cache, call VLM to extract key objects
         if not most_critical or not key_objects:
             prompt_extract = f"""You are an expert interior designer. Based on the room type and user requirement, identify the MANDATORY OBJECTS that MUST be present in this room.
 
@@ -1231,7 +1231,7 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
 ```"""
         
         try:
-            # 调用VLM提取关键物体（不需要图像）
+            # Call VLM to extract key objects (no image needed)
             data = {
                 "model": self.vlm_judge_model,
                 "messages": [
@@ -1258,33 +1258,33 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             response_json = response.json()
             content = response_json['choices'][0]['message']['content']
             
-            # 解析JSON响应
+            # Parse JSON response
             import re
             json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
             if json_match:
                 extracted_json = json.loads(json_match.group(1))
             else:
-                # 尝试直接解析
+                # Try direct parsing
                 extracted_json = json.loads(content)
             
             key_objects = extracted_json.get("mandatory_objects", [])
-            # 兼容旧格式
+            # Compatible with old format
             if not key_objects:
                 key_objects = extracted_json.get("key_objects", [])
             
-            # 确保列表不为空
+            # Ensure list is not empty
             if not key_objects:
                 self.logger.warning("Failed to extract mandatory objects from VLM response")
                 return result
             
-            # 简单的most_critical逻辑（取第一个）
+            # Simple most_critical logic (take the first one)
             most_critical = key_objects[0] if key_objects else ""
             
             result["most_critical_object"] = most_critical
             result["key_objects"] = key_objects
             self.logger.info(f"Extracted mandatory objects: {key_objects}")
             
-            # 缓存关键物体列表，避免后续重复调用VLM
+            # Cache key objects list to avoid repeated VLM calls
             if instance_id and instance_id in self._instance_dict:
                 self._instance_dict[instance_id]["cached_key_objects"] = key_objects
                 self._instance_dict[instance_id]["cached_most_critical_object"] = most_critical
@@ -1294,7 +1294,7 @@ If ALL objects are irrelevant, relevant_objects should be empty []."""
             self.logger.warning(f"Key objects extraction failed: {e}")
             return result
         
-        # 第二步：检查场景是否包含这些物体
+        # Step 2: Check if scene contains these objects
         key_objects_str = str(key_objects)
         
         prompt_evaluate = f"""You are an expert interior designer evaluating a room scene.
@@ -1327,7 +1327,7 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
 ```"""
         
         try:
-            # 调用VLM评估（需要图像）
+            # Call VLM for evaluation (image needed)
             score_result = await self._call_vlm_judge(
                 image_path,
                 prompt_evaluate,
@@ -1339,13 +1339,13 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
                 self.logger.warning("Key objects evaluation VLM call returned None")
                 return result
             
-            # 解析JSON响应
+            # Parse JSON response
             import re
             json_match = re.search(r'```json\s*(.*?)\s*```', score_result, re.DOTALL)
             if json_match:
                 eval_json = json.loads(json_match.group(1))
             else:
-                # 尝试直接解析
+                # Try direct parsing
                 eval_json = json.loads(score_result)
             
             found_count = eval_json.get("found_count", 0)
@@ -1356,7 +1356,7 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
             result["found_objects"] = found_objects
             result["missing_objects"] = missing_objects
             
-            # ========== 新增：检查基础必备物体 ==========
+            # ========== New: Check essential base objects ==========
             essential_missing = []
             essential_found = []
             
@@ -1364,25 +1364,25 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
                 essential_items = essential_config.get("essential", [])
                 aliases_map = essential_config.get("aliases", {})
                 
-                # 将场景中找到的物体描述转为小写进行匹配
+                # Convert found objects descriptions to lowercase for matching
                 found_objects_lower = [obj.lower() for obj in found_objects]
                 scene_summary_lower = scene_summary.lower() if scene_summary else ""
                 
                 for essential_item in essential_items:
-                    # 获取该物体的所有别名
+                    # Get all aliases for this object
                     item_aliases = aliases_map.get(essential_item, [essential_item])
                     
-                    # 检查是否在找到的物体中或场景摘要中
+                    # Check if it exists in found objects or scene summary
                     found = False
                     for alias in item_aliases:
                         alias_lower = alias.lower()
-                        # 检查found_objects
+                        # Check found_objects
                         for found_obj in found_objects_lower:
                             if alias_lower in found_obj or found_obj in alias_lower:
                                 found = True
                                 break
                         if not found:
-                            # 检查场景摘要
+                            # Check scene summary
                             if alias_lower in scene_summary_lower:
                                 found = True
                         if found:
@@ -1398,8 +1398,8 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
                 
                 self.logger.info(f"Essential objects check - Found: {essential_found}, Missing: {essential_missing}")
             
-            # ========== 计算评分（结合基础物体检查） ==========
-            # 如果缺失基础必备物体，直接判定为-1
+            # ========== Calculate score (combined with essential objects check) ==========
+            # If essential base objects are missing, directly set to -1
             if essential_missing:
                 result["score"] = -1.0
                 self.logger.info(f"Key objects score: -1.0 (Missing ESSENTIAL objects: {essential_missing})")
@@ -1407,7 +1407,7 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
                 result["score"] = 0.0
             else:
                 ratio = found_count / total_count
-                if ratio >= 0.99:  # 允许微小误差，视为全部包含
+                if ratio >= 0.99:  # Allow minor error, treat as all included
                     result["score"] = 1.0
                     self.logger.info(f"Key objects score: 1.0 (Found {found_count}/{total_count}, ratio={ratio:.2f})")
                 elif ratio > 0.5:
@@ -1419,7 +1419,7 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
             
         except Exception as e:
             self.logger.warning(f"Key objects evaluation failed: {e}")
-            # 如果评估失败，返回中性分数
+            # If evaluation failed, return neutral score
             result["score"] = 0.0
         
         return result
@@ -1431,15 +1431,15 @@ For each item in the Mandatory Objects List, check if a corresponding object exi
         user_requirement: str
     ) -> Optional[str]:
         """
-        第一阶段：让VLM详细描述场景（用于最终轮次）
+        Phase 1: Let VLM describe the scene in detail (used for final turn)
         
-        参数:
-            image_path: 渲染图路径
-            scene_json_str: 场景JSON字符串
-            user_requirement: 用户需求
+        Args:
+            image_path: Rendered image path
+            scene_json_str: Scene JSON string
+            user_requirement: User requirement
             
-        返回:
-            详细场景描述文本，或None（如果失败）
+        Returns:
+            Detailed scene description text, or None (if failed)
         """
         prompt_describe = f"""You are a highly critical interior design expert. Carefully examine this final scene rendering (left: top view, right: diagonal view).
 
@@ -1526,16 +1526,16 @@ Be thorough and specific in your description. Reference the coordinate grid and 
         room_type: str = ""
     ) -> Optional[str]:
         """
-        让VLM根据用户需求和房间类型生成期望的场景图
+        Let VLM generate an expected scene graph based on user requirements and room type
         
-        描述场景中应该包含的10-30个关键物体及其空间关系约束
+        Describes 10-30 key objects and their spatial relationship constraints that the scene should contain
         
-        参数:
-            user_requirement: 用户需求描述
-            room_type: 房间类型（如bedroom, living room等）
+        Args:
+            user_requirement: User requirement description
+            room_type: Room type (e.g., bedroom, living room, etc.)
             
-        返回:
-            期望场景图的自由文本描述，或None（如果失败）
+        Returns:
+            Free-text description of the expected scene graph, or None (if failed)
         """
         prompt_expected_graph = f"""You are an expert interior designer. Based on the user's requirement and room type, generate an EXPECTED SCENE GRAPH that describes what a well-designed room SHOULD contain and how objects SHOULD be arranged.
 
@@ -1588,8 +1588,8 @@ Describe the spatial relationships that MUST be satisfied:
 
 Be specific and practical. Focus on the MOST IMPORTANT constraints that define a functional, well-designed room."""
 
-        # 这里不需要图像，只需要文本生成
-        # 使用一个简单的文本请求
+        # No image needed here, only text generation
+        # Use a simple text request
         if not self.vlm_judge_enabled:
             self.logger.info("VLM judge disabled, skipping expected scene graph generation")
             return None
@@ -1636,17 +1636,17 @@ Be specific and practical. Focus on the MOST IMPORTANT constraints that define a
         user_requirement: str
     ) -> Optional[str]:
         """
-        让VLM根据渲染图和场景JSON生成实际场景的场景图
+        Let VLM generate an actual scene graph based on rendered image and scene JSON
         
-        描述当前场景中物体的实际位置和空间关系
+        Describes the actual positions and spatial relationships of objects in the current scene
         
-        参数:
-            image_path: 渲染图路径
-            scene_json_str: 场景JSON字符串
-            user_requirement: 用户需求
+        Args:
+            image_path: Rendered image path
+            scene_json_str: Scene JSON string
+            user_requirement: User requirement
             
-        返回:
-            实际场景图的自由文本描述，或None（如果失败）
+        Returns:
+            Free-text description of the actual scene graph, or None (if failed)
         """
         prompt_actual_graph = f"""You are an expert interior designer analyzing a rendered scene. Generate an ACTUAL SCENE GRAPH that describes the current state of the room.
 
@@ -1716,16 +1716,16 @@ Be objective and accurate. Describe what you SEE, not what should be."""
         user_requirement: str
     ) -> Optional[float]:
         """
-        让VLM对比期望场景图和实际场景图，评估约束满足程度
+        Let VLM compare expected and actual scene graphs to evaluate constraint satisfaction
         
-        参数:
-            image_path: 渲染图路径（用于视觉验证）
-            expected_graph: 期望场景图描述
-            actual_graph: 实际场景图描述
-            user_requirement: 用户需求
+        Args:
+            image_path: Rendered image path (for visual verification)
+            expected_graph: Expected scene graph description
+            actual_graph: Actual scene graph description
+            user_requirement: User requirement
             
-        返回:
-            场景图约束满足度评分 (-1.0, -0.5, 0.0, 0.5, 1.0)
+        Returns:
+            Scene graph constraint satisfaction score (-1.0, -0.5, 0.0, 0.5, 1.0)
         """
         prompt_compare = f"""You are an expert interior designer evaluating how well a generated scene satisfies the expected spatial constraints.
 
@@ -1819,18 +1819,18 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         current_scene_summary: str = ""
     ) -> Dict[str, float]:
         """
-        中间轮次的VLM评分：对比上一轮和本轮的渲染图，判断场景是否变得更好
+        Intermediate turn VLM scoring: compare previous and current turn renderings to determine if the scene has improved
         
-        参数:
-            prev_image_path: 上一轮渲染图路径（已拼接的俯视图+对角视图）
-            current_image_path: 本轮渲染图路径（已拼接的俯视图+对角视图）
-            user_requirement: 用户需求/房间描述
-            prev_scene_summary: 上一轮场景的物体摘要（描述、位置、大小）
-            current_scene_summary: 当前场景的物体摘要（描述、位置、大小）
+        Args:
+            prev_image_path: Previous turn rendering path (concatenated top view + diagonal view)
+            current_image_path: Current turn rendering path (concatenated top view + diagonal view)
+            user_requirement: User requirement/room description
+            prev_scene_summary: Previous turn scene object summary (description, position, size)
+            current_scene_summary: Current scene object summary (description, position, size)
             
-        返回:
-            包含一个维度评分的字典：
-            - scene_improvement: 场景是否改进 (-1.0, -0.5, 0.0, 0.5, 1.0)
+        Returns:
+            Dictionary containing one dimension score:
+            - scene_improvement: Whether the scene has improved (-1.0, -0.5, 0.0, 0.5, 1.0)
         """
         self.logger.info("Starting intermediate turn VLM judge evaluation (scene improvement comparison)")
         
@@ -1838,7 +1838,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             "scene_improvement": 0.0
         }
         
-        # 检查两张图像是否都存在
+        # Check if both images exist
         if not prev_image_path or not Path(prev_image_path).exists():
             self.logger.warning(f"Previous image not found: {prev_image_path}")
             return scores
@@ -1846,7 +1846,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             self.logger.warning(f"Current image not found: {current_image_path}")
             return scores
         
-        # 将两张图像转换为base64
+        # Convert both images to base64
         try:
             prev_img_base64 = self.image_to_base64(prev_image_path)
             curr_img_base64 = self.image_to_base64(current_image_path)
@@ -1854,7 +1854,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             self.logger.error(f"Failed to convert images to base64: {e}")
             return scores
         
-        # 构建场景物体摘要部分（如果提供）
+        # Build scene objects summary section (if provided)
         scene_comparison_section = ""
         if prev_scene_summary or current_scene_summary:
             scene_comparison_section = f"""
@@ -1873,7 +1873,7 @@ Use this to verify:
 - Whether objects are within room bounds
 """
         
-        # 构建对比评估的prompt
+        # Build comparison evaluation prompt
         prompt_compare_improvement = f"""You are an expert interior designer evaluating whether a scene has IMPROVED after editing.
 
 **IMPORTANT: You are given TWO images:**
@@ -1920,7 +1920,7 @@ Look for ANY improvement in these aspects:
 
 Output ONLY one number: -1, 0, or 1"""
 
-        # 构建带两张图像的请求
+        # Build request with two images
         import requests
         
         data = {
@@ -1949,7 +1949,7 @@ Output ONLY one number: -1, 0, or 1"""
             "temperature": 0.1
         }
         
-        # 调用VLM进行评分
+        # Call VLM for scoring
         max_retries = 3
         for attempt in range(max_retries):
             try:
@@ -1964,20 +1964,20 @@ Output ONLY one number: -1, 0, or 1"""
                     result = response.json()
                     content = result['choices'][0]['message']['content']
                     
-                    # 解析评分（优先匹配3档整数评分：-1, 0, 1）
+                    # Parse score (prefer 3-level integer score: -1, 0, 1)
                     import re
-                    # 先尝试匹配整数评分（-1, 0, 1）
+                    # First try to match integer score (-1, 0, 1)
                     match = re.search(r'(-1|0|1)(?:\s|$|[,.])', content)
                     if match:
                         score = float(match.group(1))
                         scores["scene_improvement"] = score
                         self.logger.info(f"Intermediate turn VLM score: {score}, response: {content}")
                         break
-                    # 兼容旧的小数评分格式（-1.0, -0.5, 0.5, 1.0）
+                    # Compatible with old decimal format (-1.0, -0.5, 0.5, 1.0)
                     match = re.search(r'(-?[01])\.([05])', content)
                     if match:
                         score = float(f"{match.group(1)}.{match.group(2)}")
-                        # 将旧格式映射到新的3档评分
+                        # Map old format to new 3-level scoring
                         if score >= 0.5:
                             score = 1.0
                         elif score <= -0.5:
@@ -2002,20 +2002,20 @@ Output ONLY one number: -1, 0, or 1"""
     
     def _extract_objects_summary(self, scene_data: Dict[str, Any]) -> str:
         """
-        从场景中提取物体摘要信息（用于VLM评估，节省token）
+        Extract object summary information from the scene (for VLM evaluation, saving tokens)
         
-        只提取关键信息：物体描述、位置、大小、旋转
+        Only extracts key information: object description, position, size, rotation
         
-        参数:
-            scene_data: 场景JSON数据
+        Args:
+            scene_data: Scene JSON data
             
-        返回:
-            物体摘要字符串（紧凑格式）
+        Returns:
+            Object summary string (compact format)
         """
         try:
             objects_list = []
             
-            # 从groups结构中提取物体
+            # Extract objects from groups structure
             if 'groups' in scene_data and scene_data['groups']:
                 for group in scene_data['groups']:
                     if 'objects' in group and group['objects']:
@@ -2028,7 +2028,7 @@ Output ONLY one number: -1, 0, or 1"""
                             }
                             objects_list.append(obj_info)
             
-            # 也检查flat格式的objects字段
+            # Also check flat format objects field
             elif 'objects' in scene_data and scene_data['objects']:
                 for obj in scene_data['objects']:
                     obj_info = {
@@ -2042,10 +2042,10 @@ Output ONLY one number: -1, 0, or 1"""
             if not objects_list:
                 return "No objects in scene"
             
-            # 生成紧凑格式的摘要
+            # Generate compact format summary
             summary_lines = [f"Total objects: {len(objects_list)}"]
             for i, obj in enumerate(objects_list, 1):
-                # 格式化位置和大小为简短的字符串（保留2位小数）
+                # Format position and size as compact strings (2 decimal places)
                 pos = obj['pos']
                 size = obj['size']
                 pos_str = f"[{pos[0]:.2f}, {pos[1]:.2f}, {pos[2]:.2f}]"
@@ -2065,23 +2065,23 @@ Output ONLY one number: -1, 0, or 1"""
         current_scene: Dict[str, Any]
     ) -> Dict[str, float]:
         """
-        最后一轮的VLM评分：合并评估（减少VLM调用次数）
+        Final turn VLM scoring: consolidated evaluation (reduce VLM call count)
         
-        阶段1：让VLM详细描述场景（包括物体清单、位置、朝向、关系、问题）
-        阶段2：一次性评估三个维度：合理性、需求匹配度、场景图约束
+        Phase 1: Let VLM describe the scene in detail (including object inventory, positions, orientations, relationships, problems)
+        Phase 2: Evaluate three dimensions in one call: rationality, requirement match, scene graph constraints
         
-        注意：已删除aesthetics（美观度）评估
+        Note: aesthetics evaluation has been removed
         
-        参数:
-            image_path: 最终渲染图路径（左侧顶视图，右侧对角视图）
-            user_requirement: 用户需求
-            current_scene: 当前场景JSON数据
+        Args:
+            image_path: Final rendering path (left: top view, right: diagonal view)
+            user_requirement: User requirement
+            current_scene: Current scene JSON data
             
-        返回:
-            包含三个维度评分的字典：
-            - rationality: 场景合理性 (-1.0, -0.5, 0.0, 0.5, 1.0) - 物体完整性、空间分布、布局真实性
-            - scene_graph: 场景图约束满足度 (-1.0, -0.5, 0.0, 0.5, 1.0) - 空间关系约束
-            - requirement_match: 与用户需求的匹配度 (-1.0, -0.5, 0.0, 0.5, 1.0)
+        Returns:
+            Dictionary containing three dimension scores:
+            - rationality: Scene rationality (-1.0, -0.5, 0.0, 0.5, 1.0) - object completeness, spatial distribution, layout realism
+            - scene_graph: Scene graph constraint satisfaction (-1.0, -0.5, 0.0, 0.5, 1.0) - spatial relationship constraints
+            - requirement_match: Match with user requirements (-1.0, -0.5, 0.0, 0.5, 1.0)
         """
         self.logger.info("Starting final turn VLM judge evaluation (consolidated)")
         
@@ -2091,10 +2091,10 @@ Output ONLY one number: -1, 0, or 1"""
             "requirement_match": 0.0
         }
         
-        # 将场景JSON转换为格式化字符串
+        # Convert scene JSON to formatted string
         scene_json_str = json.dumps(current_scene, indent=2, ensure_ascii=False)
         
-        # ========== 第一阶段：VLM详细描述场景 ==========
+        # ========== Phase 1: VLM detailed scene description ==========
         self.logger.info("Phase 1: VLM comprehensive scene description")
         scene_description = await self._vlm_describe_scene(
             image_path, scene_json_str, user_requirement
@@ -2106,10 +2106,10 @@ Output ONLY one number: -1, 0, or 1"""
         else:
             self.logger.info(f"VLM scene description completed: {scene_description[:500]}...")
         
-        # 从场景中提取房间类型
+        # Extract room type from scene
         room_type = current_scene.get('room_type', '')
         
-        # ========== 第二阶段：合并评估三个维度（一次VLM调用） ==========
+        # ========== Phase 2: Consolidated evaluation of three dimensions (single VLM call) ==========
         self.logger.info("Phase 2: Consolidated evaluation (rationality + requirement_match + scene_graph)")
         
         prompt_consolidated = f"""You are a highly critical interior design expert. Evaluate this room scene on THREE dimensions.
@@ -2126,7 +2126,7 @@ Output ONLY one number: -1, 0, or 1"""
 
 **EVALUATE THREE DIMENSIONS:**
 
-## DIMENSION 1: RATIONALITY (场景合理性)
+## DIMENSION 1: RATIONALITY (Scene Rationality)
 Check these aspects:
 1. **Object Completeness**: Are essential furniture items present for this room type?
    - Bedroom: bed, wardrobe, nightstand
@@ -2139,14 +2139,14 @@ Check these aspects:
 3. **Layout Realism**: Does it look like a real, livable room?
 4. **Object Sizes**: Are sizes realistic (no miniature furniture or giant accessories)?
 
-## DIMENSION 2: REQUIREMENT MATCH (需求匹配度)
+## DIMENSION 2: REQUIREMENT MATCH (Requirement Match)
 Check these aspects:
 1. **Explicit Requirements**: Are all user-requested items present?
 2. **Implicit Requirements**: For the room type, are standard essentials present?
 3. **Relevance**: Are objects appropriate for this room? Any irrelevant objects (e.g., toilet in bedroom)?
 4. **Style/Theme**: Does it match any requested style?
 
-## DIMENSION 3: SCENE GRAPH (场景图约束)
+## DIMENSION 3: SCENE GRAPH (Scene Graph Constraints)
 Check spatial relationships:
 1. **Functional Groupings**: Are related objects grouped properly (e.g., nightstands near bed)?
 2. **Orientations**: Do objects face sensible directions (e.g., sofa facing TV)?
@@ -2197,10 +2197,10 @@ Scores must be one of: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 
         except Exception as e:
             self.logger.error(f"Consolidated VLM evaluation failed: {e}", exc_info=True)
-            # 如果合并评估失败，尝试回退到单独评估
+            # If consolidated evaluation failed, try fallback to separate evaluations
             self.logger.info("Falling back to separate evaluations...")
             
-            # 单独评估合理性
+            # Separately evaluate rationality
             prompt_rationality = f"""Evaluate scene RATIONALITY only.
 User requirement: {user_requirement}
 Scene description: {scene_description}
@@ -2214,7 +2214,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             if score_rationality is not None:
                 scores["rationality"] = float(score_rationality)
             
-            # 单独评估需求匹配
+            # Separately evaluate requirement match
             prompt_match = f"""Evaluate REQUIREMENT MATCH only.
 User requirement: {user_requirement}
 Scene description: {scene_description}
@@ -2228,7 +2228,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             if score_match is not None:
                 scores["requirement_match"] = float(score_match)
             
-            # 单独评估场景图约束
+            # Separately evaluate scene graph constraints
             prompt_graph = f"""Evaluate SCENE GRAPH constraints only.
 User requirement: {user_requirement}
 Scene description: {scene_description}
@@ -2251,16 +2251,16 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         **kwargs
     ) -> str:
         """
-        开始一个新的交互实例
+        Start a new interaction instance
         
-        参数:
-            instance_id: 实例ID，如果为None则自动生成
-            **kwargs: 额外参数，包括：
-                - initial_scene: 初始场景JSON数据
-                - max_turns: 覆盖默认最大轮数
+        Args:
+            instance_id: Instance ID, auto-generated if None
+            **kwargs: Additional arguments, including:
+                - initial_scene: Initial scene JSON data
+                - max_turns: Override default maximum turns
                 
-        返回:
-            实例ID
+        Returns:
+            Instance ID
         """
         import sys
         print(f"[SCENE_EDITING] start_interaction called with kwargs: {list(kwargs.keys())}",   
@@ -2273,38 +2273,38 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             instance_id = str(uuid.uuid4())
             self.logger.info(f"Generated new instance_id: {instance_id}")
         
-        # 获取初始场景（第一轮会从模型响应提取，所以可以为空）
+        # Get initial scene (first turn will extract from model response, so can be empty)
         initial_scene = kwargs.get("initial_scene", {})
         
-        # 记录初始场景状态
+        # Log initial scene state
         if initial_scene:
             self.logger.info(f"Initial scene provided with {len(initial_scene.get('objects', initial_scene.get('groups', [])))} objects/groups")
         else:
             self.logger.info("No initial scene provided, will extract from model response in first turn")
         
-        # 创建实例输出目录
+        # Create instance output directory
         instance_output_dir = self.output_dir / instance_id
         instance_output_dir.mkdir(parents=True, exist_ok=True)
         
         self.logger.info(f"Created output directory: {instance_output_dir}")
         
-        # 初始化实例状态
+        # Initialize instance state
         self._instance_dict[instance_id] = {  
             "current_scene": initial_scene,  
             "turn_count": 0,  
             "max_turns": kwargs.get("max_turns", self.max_turns),  
             "output_dir": instance_output_dir,  
-            "history": [],  # 存储每轮的操作历史  
-            "rewards": [],  # 存储每轮的总奖励值  
-            "reward_components": [],  # 新增 - 存储每轮的命名奖励组件  
+            "history": [],  # Store operation history for each turn  
+            "rewards": [],  # Store total reward values for each turn  
+            "reward_components": [],  # New - store named reward components for each turn  
             "total_reward": 0.0,
-            "user_requirement": kwargs.get("user_requirement", ""),  # 保存用户需求
-            # 关键物体缓存（避免每轮重复调用VLM提取）
-            "cached_key_objects": None,  # 缓存的关键物体列表
-            "cached_most_critical_object": None  # 缓存的最关键物体
+            "user_requirement": kwargs.get("user_requirement", ""),  # Save user requirement
+            # Key objects cache (avoid repeated VLM calls per turn)
+            "cached_key_objects": None,  # Cached key objects list
+            "cached_most_critical_object": None  # Cached most critical object
         }
         
-        # 保存初始场景（如果提供了）
+        # Save initial scene (if provided)
         if initial_scene:
             initial_scene_path = instance_output_dir / "initial_scene.json"
             with open(initial_scene_path, 'w', encoding='utf-8') as f:
@@ -2327,19 +2327,19 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
     
     def _check_room_shape_reward(self, bounds_bottom: List, bounds_top: List) -> Tuple[float, str]:
         """
-        根据房间顶点数计算房间形状奖励（只检查顶点个数，只接受偶数顶点）
+        Calculate room shape reward based on number of vertices (only checks vertex count, only accepts even vertex counts)
         
-        奖励规则：
-        - 4个顶点：1.0（最佳）
-        - 6个顶点：0.5
-        - 8个顶点：0.5
-        - 其他顶点数：-1.0
+        Reward rules:
+        - 4 vertices: 1.0 (best)
+        - 6 vertices: 0.5
+        - 8 vertices: 0.5
+        - Other vertex counts: -1.0
         
-        同时验证每个点的有效性：每个点必须是包含至少3个坐标的列表
+        Also validates each point: each point must be a list containing at least 3 coordinates
         
         Args:
-            bounds_bottom: 房间底部边界点列表
-            bounds_top: 房间顶部边界点列表
+            bounds_bottom: List of room bottom boundary points
+            bounds_top: List of room top boundary points
         
         Returns:
             (reward, message)
@@ -2347,7 +2347,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         try:
             import numpy as np
             
-            # 首先验证每个点的有效性（必须是恰好包含3个坐标的列表）
+            # First validate each point (must be a list/tuple with exactly 3 coordinates)
             def validate_points(points, name):
                 if not points:
                     return False, f"{name} is empty"
@@ -2368,24 +2368,24 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 self.logger.warning(f"Invalid bounds_top: {msg_top}")
                 return -1.0, f"Invalid bounds_top: {msg_top}"
             
-            # 转换为numpy数组
+            # Convert to numpy arrays
             bounds_bottom = np.array(bounds_bottom)
             bounds_top = np.array(bounds_top)
             
             num_bottom = len(bounds_bottom)
             num_top = len(bounds_top)
             
-            # 顶点数不一致
+            # Vertex count mismatch
             if num_bottom != num_top:
                 return -1.0, f"Bottom ({num_bottom}) and top ({num_top}) have different number of points"
             
-            # 计算房间尺寸用于日志
+            # Calculate room dimensions for logging
             x_coords = bounds_bottom[:, 0]
             z_coords = bounds_bottom[:, 2]
             x_size = x_coords.max() - x_coords.min()
             z_size = z_coords.max() - z_coords.min()
             
-            # 只接受偶数顶点：4、6、8
+            # Only accept even vertex counts: 4, 6, 8
             if num_bottom == 4:
                 self.logger.info(f"Room has 4 vertices (best): {x_size:.2f}m × {z_size:.2f}m, reward=1.0")
                 return 1.0, "4 vertices (best)"
@@ -2404,35 +2404,35 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
     
     def _check_room_is_rectangle(self, bounds_bottom: List, bounds_top: List) -> Tuple[bool, str]:
         """
-        检查房间是否有合法的顶点数（向后兼容的包装方法）
+        Check if room has a valid vertex count (backward-compatible wrapper method)
         
-        只接受偶数顶点：4、6、8
+        Only accepts even vertex counts: 4, 6, 8
         
         Args:
-            bounds_bottom: 房间底部边界点列表
-            bounds_top: 房间顶部边界点列表
+            bounds_bottom: List of room bottom boundary points
+            bounds_top: List of room top boundary points
         
         Returns:
             (is_valid, error_message)
         """
         reward, message = self._check_room_shape_reward(bounds_bottom, bounds_top)
-        # 奖励 >= 0 认为是可接受的房间形状
+        # Reward >= 0 is considered an acceptable room shape
         return reward >= 0.0, message
     
     def _check_room_type_reward(self, scene_data: Dict[str, Any], user_requirement: str) -> float:
         """
-        检查生成的room_type和room_id是否与用户需求匹配
+        Check if generated room_type and room_id match user requirements
         
         Args:
-            scene_data: 场景JSON数据，包含room_type和room_id字段
-            user_requirement: 用户需求描述
+            scene_data: Scene JSON data containing room_type and room_id fields
+            user_requirement: User requirement description
         
         Returns:
-            1.0: 两者都匹配或无法判断
-            0.0: 只有一个匹配
-            -1.0: 两者都不匹配
+            1.0: Both match or cannot determine
+            0.0: Only one matches
+            -1.0: Neither matches
         """
-        # 定义支持的房间类型（标准化为小写用于匹配）
+        # Define supported room types (standardized to lowercase for matching)
         valid_room_types = [
             "living room", "livingroom",
             "bedroom",
@@ -2448,7 +2448,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             "library"
         ]
         
-        # 房间类型的别名映射（用于匹配不同表达方式）
+        # Room type alias mapping (for matching different expressions)
         room_type_aliases = {
             "living room": ["living room", "livingroom", "living-room", "lounge"],
             "bedroom": ["bedroom", "bed room", "bed-room"],
@@ -2464,12 +2464,12 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             "library": ["library", "reading room", "book room"]
         }
         
-        # 如果没有用户需求，无法判断，返回1.0
+        # If no user requirement, cannot determine, return 1.0
         if not user_requirement:
             self.logger.info("No user requirement provided, cannot check room type")
             return 1.0
         
-        # 从用户需求中提取期望的房间类型
+        # Extract expected room type from user requirement
         user_requirement_lower = user_requirement.lower()
         expected_room_type = None
         
@@ -2481,33 +2481,33 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             if expected_room_type:
                 break
         
-        # 如果无法从用户需求中识别房间类型，返回1.0
+        # If cannot identify room type from user requirement, return 1.0
         if not expected_room_type:
             self.logger.info(f"Could not identify room type from user requirement: {user_requirement[:100]}...")
             return 1.0
         
         self.logger.info(f"Expected room type from user requirement: {expected_room_type}")
         
-        # 获取场景中的room_type和room_id
+        # Get room_type and room_id from scene
         generated_room_type = scene_data.get("room_type", "").lower().strip()
         generated_room_id = scene_data.get("room_id", "").lower().strip()
         
         self.logger.info(f"Generated room_type: '{generated_room_type}', room_id: '{generated_room_id}'")
         
-        # 检查room_type是否匹配
+        # Check if room_type matches
         room_type_match = False
         if expected_room_type in room_type_aliases:
             for alias in room_type_aliases[expected_room_type]:
-                # 检查生成的room_type是否包含期望类型的别名
+                # Check if generated room_type contains alias of expected type
                 if alias.replace(" ", "") in generated_room_type.replace(" ", ""):
                     room_type_match = True
                     break
         
-        # 检查room_id是否匹配（room_id通常包含房间类型信息，如"LivingRoom-1003"）
+        # Check if room_id matches (room_id usually contains room type info, e.g., "LivingRoom-1003")
         room_id_match = False
         if expected_room_type in room_type_aliases:
             for alias in room_type_aliases[expected_room_type]:
-                # 去掉空格后比较
+                # Compare after removing spaces
                 alias_no_space = alias.replace(" ", "").lower()
                 if alias_no_space in generated_room_id.replace(" ", "").replace("-", "").replace("_", ""):
                     room_id_match = True
@@ -2515,7 +2515,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         
         self.logger.info(f"Room type match: {room_type_match}, Room ID match: {room_id_match}")
         
-        # 计算奖励
+        # Calculate reward
         if room_type_match and room_id_match:
             return 1.0
         elif room_type_match or room_id_match:
@@ -2530,21 +2530,21 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         **kwargs
     ) -> Tuple[bool, str, float, Dict[str, Any]]:
         """
-        生成响应并执行场景编辑
+        Generate response and execute scene editing
         
-        参数:
-            instance_id: 实例ID
-            messages: 消息历史列表
-            **kwargs: 额外参数，包括：
-                - tool_calls: 工具调用列表
-                - retrieve_assets: 是否进行资产检索 (默认True)
+        Args:
+            instance_id: Instance ID
+            messages: Message history list
+            **kwargs: Additional arguments, including:
+                - tool_calls: Tool call list
+                - retrieve_assets: Whether to perform asset retrieval (default True)
                 
-        返回:
-            (is_done, response_text, reward, metadata) 元组：
-            - is_done: 是否完成交互
-            - response_text: 响应文本
-            - reward: 本轮奖励
-            - metadata: 元数据（包含渲染图像等）
+        Returns:
+            (is_done, response_text, reward, metadata) tuple:
+            - is_done: Whether the interaction is complete
+            - response_text: Response text
+            - reward: Reward for this turn
+            - metadata: Metadata (including rendered images, etc.)
         """
         self.logger.info("="*80)
         self.logger.info(f"generate_response called for instance {instance_id}")
@@ -2564,13 +2564,13 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             print(f"Turn {current_turn}/{instance['max_turns']} - Instance: {instance_id}")
             print(f"{'='*60}")
         
-        # 第一轮特殊处理：提取模型生成的初始场景
+        # First turn special handling: extract the model-generated initial scene
         if current_turn == 1:
             self.logger.info("First turn: extracting initial scene from model response")
             
-            # 从最后一条assistant消息中提取<create_scene>
+            # Extract <create_scene> from the last assistant message
             initial_scene = None
-            format_conversion_success = False  # 标记格式转换是否成功
+            format_conversion_success = False  # Flag for whether format conversion succeeded
             
             for msg in reversed(messages):
                 if msg.get("role") == "assistant":
@@ -2580,25 +2580,25 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         if initial_scene:
                             self.logger.info(f"Extracted initial scene from model response")
                             
-                            # ===== 格式转换逻辑 =====
-                            # 检测并转换场景格式
+                            # ===== Format Conversion Logic =====
+                            # Detect and convert scene format
                             try:
-                                # 保存原始模型输出（用于日志）
+                                # Save original model output (for logging)
                                 original_format = "grouped" if "groups" in initial_scene else "flat"
                                 self.logger.info(f"Model output format: {original_format}")
                                 
-                                # 如果是flat格式，转换为grouped格式（用于内部处理）
+                                # If flat format, convert to grouped format (for internal processing)
                                 if "objects" in initial_scene and "groups" not in initial_scene:
                                     self.logger.info("Converting flat format to grouped format for internal processing")
                                     initial_scene = convert_flat_to_grouped(initial_scene)
                                     format_conversion_success = True
                                     self.logger.info("Format conversion successful")
                                 elif "groups" in initial_scene:
-                                    # 已经是grouped格式，不需要转换
+                                    # Already in grouped format, no conversion needed
                                     format_conversion_success = True
                                     self.logger.info("Scene already in grouped format")
                                 else:
-                                    # 无法识别的格式
+                                    # Unrecognizable format
                                     self.logger.error("Unknown scene format: missing both 'groups' and 'objects' fields")
                                     format_conversion_success = False
                                 
@@ -2606,15 +2606,15 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                                 self.logger.error(f"Format conversion failed: {e}", exc_info=True)
                                 format_conversion_success = False
                             
-                            # 存储格式转换状态到实例（用于奖励计算）
+                            # Store format conversion state in instance (for reward calculation)
                             instance["format_conversion_success"] = format_conversion_success
                             
                             self.logger.info(f"Scene has {len(initial_scene.get('groups', []))} groups")
                             
-                            # 更新实例的当前场景为转换后的grouped格式
+                            # Update instance's current scene to the converted grouped format
                             instance["current_scene"] = initial_scene
                             
-                            # 保存模型生成的初始场景（grouped格式）
+                            # Save model-generated initial scene (grouped format)
                             model_initial_scene_path = instance["output_dir"] / "model_generated_initial_scene.json"
                             with open(model_initial_scene_path, 'w', encoding='utf-8') as f:
                                 json.dump(initial_scene, f, indent=2, ensure_ascii=False)
@@ -2625,46 +2625,46 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                                 print(f"  Format conversion: {'✓' if format_conversion_success else '✗'}")
                                 print(f"  Groups: {len(initial_scene.get('groups', []))}")
                             break
-                    break  # 只检查最后一条assistant消息
+                    break  # Only check the last assistant message
             
             if not initial_scene:
-                error_msg = "第一轮：模型未生成有效的初始场景（缺少<create_scene>标签）"
+                error_msg = "Turn 1: Model did not generate a valid initial scene (missing <create_scene> tag)"
                 self.logger.error(error_msg)
                 if self.verbose:
                     print(f"Error: {error_msg}")
-                # 格式转换失败
+                # Format conversion failed
                 instance["format_conversion_success"] = False
                 return True, error_msg, -1.0, {}
             
-            # ===== 在渲染前验证 bounds 有效性 =====
-            # 检查 bounds_bottom 和 bounds_top 是否有效，无效则直接终止对话
+            # ===== Validate bounds before rendering =====
+            # Check if bounds_bottom and bounds_top are valid; terminate conversation if invalid
             room_envelope = initial_scene.get("room_envelope", {})
             bounds_bottom = room_envelope.get("bounds_bottom", initial_scene.get("bounds_bottom", []))
             bounds_top = room_envelope.get("bounds_top", initial_scene.get("bounds_top", []))
             
-            # 验证 bounds 有效性
+            # Validate bounds
             room_shape_reward, shape_msg = self._check_room_shape_reward(bounds_bottom, bounds_top)
             invalid_bounds = room_shape_reward < 0
             if invalid_bounds:
-                # 房间角点数不在规定范围内，记录警告但不终止对话
-                # 设置该轮 reward 为 -1，但继续进行下一轮次
-                self.logger.warning(f"第一轮：场景 bounds 数据无效 - {shape_msg}，将继续下一轮次")
+                # Room vertex count is out of the allowed range, log warning but do not terminate
+                # Set this turn's reward to -1, but continue to the next turn
+                self.logger.warning(f"Turn 1: Scene bounds data invalid - {shape_msg}, continuing to next turn")
                 if self.verbose:
-                    print(f"Warning: 场景 bounds 数据无效 - {shape_msg}，继续下一轮次")
+                    print(f"Warning: Scene bounds data invalid - {shape_msg}, continuing to next turn")
             else:
                 self.logger.info(f"Bounds validation passed: {shape_msg}")
             
-            # 第一轮不执行tool_calls，直接渲染初始场景并返回
+            # First turn does not execute tool_calls; directly render the initial scene and return
             self.logger.info("First turn: rendering initial scene without tool_calls")
             
             try:
-                # 渲染初始场景（不需要tool_calls）
+                # Render initial scene (no tool_calls needed)
                 from RL_utils import render_scene_quick
                 
-                # 设置输出路径
+                # Set output path
                 img_output_path = instance["output_dir"] / f"turn_{current_turn:03d}_initial_merged.png"
                 
-                # 使用信号量限制并发渲染
+                # Use semaphore to limit concurrent rendering
                 render_semaphore = await self._get_render_semaphore()
                 async with render_semaphore:
                     img_path_result = await asyncio.to_thread(
@@ -2673,10 +2673,10 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         output_path=str(img_output_path),
                         return_image=True,
                         verbose=self.verbose,
-                        fast_mode=True  # 启用快速渲染模式（512x512, 8采样）
+                        fast_mode=True  # Enable fast rendering mode (512x512, 8 samples)
                     )
                 
-                # render_scene_quick 返回 (path, image) 当 return_image=True
+                # render_scene_quick returns (path, image) when return_image=True
                 if isinstance(img_path_result, tuple):
                     img_path, img = img_path_result
                 else:
@@ -2685,7 +2685,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 
                 self.logger.info(f"Initial scene rendered: {img_path}")
                 
-                # 如果没有图像对象，尝试加载
+                # If no image object, try to load it
                 if img is None and img_path and Path(img_path).exists():
                     try:
                         img = Image.open(img_path)
@@ -2694,14 +2694,14 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         self.logger.warning(f"Failed to load image: {e}")
                 
             except Exception as e:
-                error_msg = f"初始场景渲染失败: {str(e)}"
+                error_msg = f"Initial scene rendering failed: {str(e)}"
                 self.logger.error(f"Rendering error: {error_msg}", exc_info=True)
                 if self.verbose:
                     print(f"Error: {error_msg}")
                 return True, error_msg, -1.0, {}
             
-            # 计算初始场景的奖励
-            # 如果 bounds 无效，直接设置 reward 为 -1
+            # Calculate initial scene reward
+            # If bounds are invalid, set reward to -1 directly
             if invalid_bounds:
                 reward = -1.0
                 self.logger.info(f"Initial scene reward set to -1.0 due to invalid bounds: {shape_msg}")
@@ -2710,14 +2710,14 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 reward = await self.calculate_score(instance_id, messages=messages)
                 self.logger.info(f"Initial scene reward: {reward}")
             
-            # 存储奖励
+            # Store rewards
             instance["rewards"].append(reward)
             instance["total_reward"] += reward
             
-            # 记录历史
+            # Record history
             history_entry = {
                 "turn": current_turn,
-                "tool_calls": [],  # 第一轮没有tool_calls
+                "tool_calls": [],  # First turn has no tool_calls
                 "reward": reward,
                 "is_terminated": False,
                 "img_path": img_path,
@@ -2729,16 +2729,16 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 history_entry["bounds_error"] = shape_msg
             instance["history"].append(history_entry)
             
-            # ===== 返回flat格式给模型 =====
-            # 将grouped格式转换回flat格式
+            # ===== Return flat format to model =====
+            # Convert grouped format back to flat format
             try:
                 flat_scene_for_model = convert_grouped_to_flat(initial_scene)
                 self.logger.info("Converted scene back to flat format for model output")
             except Exception as e:
                 self.logger.error(f"Failed to convert to flat format for output: {e}")
-                flat_scene_for_model = initial_scene  # 回退到原始格式
+                flat_scene_for_model = initial_scene  # Fall back to original format
             
-            # 构建响应
+            # Build response
             response_text = "<image>\n"
             user_requirement = instance.get("user_requirement", "")
             if user_requirement:
@@ -2754,49 +2754,49 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             
             return False, response_text, reward, metadata
         
-        # 第二轮及以后：正常的tool_calls处理流程
+        # Second turn and onwards: normal tool_calls processing flow
         self.logger.info("Turn >= 2: processing tool_calls")
         
-        # 提取tool_calls（从kwargs或最后一条消息）
+        # Extract tool_calls (from kwargs or last message)
         tool_calls = kwargs.get("tool_calls", [])
         if not tool_calls and messages:
-            # 尝试从最后一条assistant消息中提取tool_calls
-            # tool_calls使用<tool_calls></tool_calls>标签包裹
+            # Try to extract tool_calls from the last assistant message
+            # tool_calls are wrapped in <tool_calls></tool_calls> tags
             for msg in reversed(messages):
                 if msg.get("role") == "assistant":
                     content = msg.get("content", "")
                     if isinstance(content, str) and "<tool_calls>" in content and "</tool_calls>" in content:
                         try:
-                            # 提取<tool_calls>...</tool_calls>之间的内容
+                            # Extract content between <tool_calls>...</tool_calls>
                             import re
                             match = re.search(r'<tool_calls>(.*?)</tool_calls>', content, re.DOTALL)
                             if match:
                                 tool_calls_str = match.group(1).strip()
-                                # 解析JSON
+                                # Parse JSON
                                 tool_calls = json.loads(tool_calls_str)
                                 self.logger.info(f"Extracted tool_calls from assistant message: {len(tool_calls)} calls")
                                 break
                         except (json.JSONDecodeError, AttributeError) as e:
                             self.logger.warning(f"Failed to parse tool_calls from message: {e}")
                             self.logger.warning(f"Content: {content[:200]}...")
-                    break  # 只检查最后一条assistant消息
+                    break  # Only check the last assistant message
         
         self.logger.info(f"Tool calls: {json.dumps(tool_calls, indent=2, default=str)}")
         
         if not tool_calls:
-            # 没有tool_calls，返回错误
+            # No tool_calls, return error
             self.logger.warning("No tool_calls provided")
-            return False, "错误：未提供tool_calls", -1.0, {}
+            return False, "Error: No tool_calls provided", -1.0, {}
         
-        # 执行场景编辑和渲染
+        # Execute scene editing and rendering
         self.logger.info("Starting edit_and_render_scene")
         
-        # 用于记录工具调用是否成功
+        # Track whether tool calls succeeded
         tool_execution_success = True
         tool_execution_error = None
         
         try:
-            # 使用信号量限制并发渲染
+            # Use semaphore to limit concurrent rendering
             render_semaphore = await self._get_render_semaphore()
             async with render_semaphore:
                 edited_scene, img_path, img, is_terminated = await asyncio.to_thread(
@@ -2806,34 +2806,34 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                     output_dir=instance["output_dir"],
                     scene_id=f"turn_{current_turn:03d}",
                     retrieve_assets=kwargs.get("retrieve_assets", True),
-                    use_objaverse=self.use_objaverse,  # 使用配置的资产来源
+                    use_objaverse=self.use_objaverse,  # Use configured asset source
                     return_image=True,
                     verbose=self.verbose,
-                    fast_mode=True  # 启用快速渲染模式（512x512, 8采样，约2-3倍加速）
+                    fast_mode=True  # Enable fast rendering mode (512x512, 8 samples, ~2-3x speedup)
                 )
             self.logger.info(f"edit_and_render_scene completed. Image: {img_path}")
         except (ValueError, KeyError, FileNotFoundError, RuntimeError) as e:
-            # 捕获特定的预期错误
+            # Catch specific expected errors
             tool_execution_success = False
             tool_execution_error = str(e)
-            error_msg = f"场景编辑失败: {str(e)}"
+            error_msg = f"Scene editing failed: {str(e)}"
             self.logger.error(f"Expected error: {error_msg}")
             if self.verbose:
                 print(f"Error: {error_msg}")
             
-            # 工具调用失败，但仍然计算奖励（包含工具执行失败的惩罚）
-            # 使用当前场景（未修改）计算奖励
+            # Tool call failed, but still calculate reward (includes tool execution failure penalty)
+            # Use current scene (unmodified) to calculate reward
             reward = await self.calculate_score(
                 instance_id, 
                 messages=messages, 
                 tool_execution_success=False
             )
             
-            # 存储奖励
+            # Store reward
             instance["rewards"].append(reward)
             instance["total_reward"] += reward
             
-            # 记录失败的工具调用到历史
+            # Record failed tool call to history
             instance["history"].append({
                 "turn": current_turn,
                 "tool_calls": tool_calls,
@@ -2845,28 +2845,28 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             
             return True, error_msg, reward, {}
         except Exception as e:
-            # 未预期的错误
+            # Unexpected error
             tool_execution_success = False
             tool_execution_error = str(e)
-            error_msg = f"场景编辑遇到未预期错误: {str(e)}"
+            error_msg = f"Scene editing encountered unexpected error: {str(e)}"
             self.logger.error(f"Unexpected error: {error_msg}", exc_info=True)
             if self.verbose:
                 print(f"Unexpected Error: {error_msg}")
                 import traceback
                 traceback.print_exc()
             
-            # 未预期错误，仍然计算奖励（包含工具执行失败的惩罚）
+            # Unexpected error, still calculate reward (includes tool execution failure penalty)
             reward = await self.calculate_score(
                 instance_id, 
                 messages=messages, 
                 tool_execution_success=False
             )
             
-            # 存储奖励
+            # Store rewards
             instance["rewards"].append(reward)
             instance["total_reward"] += reward
             
-            # 记录失败的工具调用到历史
+            # Record failed tool calls to history
             instance["history"].append({
                 "turn": current_turn,
                 "tool_calls": tool_calls,
@@ -2878,31 +2878,31 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             
             return True, error_msg, reward, {}
         
-        # 保存编辑前的场景（用于VLM judge评估）
+        # Save the scene before editing (for VLM judge evaluation)
         scene_before_edit = instance["current_scene"]
         
-        # 更新当前场景（保持为grouped格式）
+        # Update current scene (keep in grouped format)
         instance["current_scene"] = edited_scene
         self.logger.info("Current scene updated")
         
-        # 计算奖励，传递工具执行状态、终止状态、编辑前的场景和当前图像路径
+        # Calculate reward, passing tool execution status, termination status, scene before edit, and current image path
         self.logger.info("Calculating reward")
         reward = await self.calculate_score(
             instance_id, 
             messages=messages, 
             tool_execution_success=tool_execution_success,
             is_terminated=is_terminated,
-            scene_before_edit=scene_before_edit,  # 传递编辑前的场景
-            current_img_path=img_path  # 传递本轮生成的图像路径
+            scene_before_edit=scene_before_edit,  # Pass the scene before editing
+            current_img_path=img_path  # Pass current turn's generated image path
         )  
         self.logger.info(f"Reward calculated: {reward}")
         
-        # 存储奖励和组件  
+        # Store rewards and components  
         instance["rewards"].append(reward)    
         instance["total_reward"] += reward
         
         
-        # 记录历史
+        # Record history
         instance["history"].append({
             "turn": current_turn,
             "tool_calls": tool_calls,
@@ -2912,35 +2912,35 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
             "tool_execution_success": tool_execution_success
         })
         
-        # 判断是否终止
+        # Determine whether to terminate
         is_done = False
         
-        # ===== 返回flat格式给模型 =====
-        # 将grouped格式转换回flat格式
+        # ===== Return flat format to model =====
+        # Convert grouped format back to flat format
         try:
             flat_scene_for_model = convert_grouped_to_flat(edited_scene)
             self.logger.info("Converted edited scene back to flat format for model output")
         except Exception as e:
             self.logger.error(f"Failed to convert to flat format for output: {e}")
-            flat_scene_for_model = edited_scene  # 回退到原始格式
+            flat_scene_for_model = edited_scene  # Fall back to original format
         
-        # 构建响应：四部分格式（含反馈）
-        # 第一部分: <image> 标签
+        # Build response: four-part format (with feedback)
+        # Part 1: <image> tag
         response_text = "<image>\n"
         # response_text = ""
         
-        # 第二部分: 用户需求（从 kwargs 或实例状态获取）
+        # Part 2: User requirement (from kwargs or instance state)
         user_requirement = instance.get("user_requirement", "")
         if user_requirement:
             response_text += f"{user_requirement}\n"
         
-        # 第三部分: 反馈（如果有）- 在用户需求后、场景之前
+        # Part 3: Feedback (if available) - after user requirement, before scene
         last_feedback = instance.get("last_feedback", "")
         if last_feedback:
             response_text += f"<feedback>\n{last_feedback}\n</feedback>\n"
             self.logger.info(f"Injected feedback into response: {last_feedback[:100]}...")
         
-        # 第四部分: <current_scene>json</current_scene> (使用flat格式)
+        # Part 4: <current_scene>json</current_scene> (using flat format)
         response_text += f"<current_scene>\n```json\n{json.dumps(flat_scene_for_model, indent=2, ensure_ascii=False)}\n```\n</current_scene>"
         
         if is_terminated:
@@ -2958,7 +2958,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 print(f"  Total reward: {instance['total_reward']:.4f}")
                 print(f"{'='*60}")
         
-        # 容错机制：如果 img 为 None，尝试从 img_path 加载
+        # Fault tolerance: if img is None, try to load from img_path
         if img is None and img_path:
             try:
                 from PIL import Image
@@ -2971,9 +2971,9 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 if self.verbose:
                     print(f"Warning: Failed to load image from {img_path}: {e}")
         
-        # 准备元数据
+        # Prepare metadata
         metadata = {
-            "image": [img] if img else [],  # PIL Image对象列表
+            "image": [img] if img else [],  # List of PIL Image objects
         }
         
         self.logger.info(f"generate_response completed. is_done={is_done}, reward={reward}")
@@ -2983,38 +2983,38 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
     
     def _calculate_format_reward(self, messages: List[Dict[str, Any]], turn: int, instance_id: str) -> float:
         """
-        计算格式reward
+        Calculate format reward
         
         Args:
-            messages: 消息历史
-            turn: 当前轮次
-            instance_id: 实例ID，用于获取当前场景状态和格式转换状态
+            messages: Message history
+            turn: Current turn number
+            instance_id: Instance ID, used to get current scene state and format conversion state
         
-        第一轮：
-        - 必须包含<create_scene>...</create_scene>，且不应有<think>和<conclusion>
-        - JSON格式必须正确
-        - 必须是空场景（groups为空列表或包含空的objects列表）
-        - 格式转换必须成功（如果模型输出flat格式，转换为grouped格式必须成功）
+        Turn 1:
+        - Must contain <create_scene>...</create_scene>, and should not have <think> or <conclusion>
+        - JSON format must be correct
+        - Must be an empty scene (groups is an empty list or contains empty objects list)
+        - Format conversion must succeed (if model outputs flat format, conversion to grouped format must succeed)
         
-        其他轮：
-        - 必须按顺序包含<think>、<tool_calls>
-        - tool_calls的JSON格式必须正确
-        - 工具调用必须包含有效的工具名称和必需参数
-        - 涉及jid的操作必须使用当前场景中存在的jid
+        Other turns:
+        - Must contain <think> and <tool_calls> in order
+        - tool_calls JSON format must be correct
+        - Tool calls must contain valid tool names and required parameters
+        - Operations involving jid must use jid existing in the current scene
         
         Returns:
-            格式正确返回1.0，部分错误返回0到-1之间的值，完全错误或格式转换失败返回-1.0
+            Correct format returns 1.0, partial errors return values between 0 and -1, completely wrong or failed format conversion returns -1.0
         """
         import re
         
-        # ===== 首先检查格式转换是否成功 =====
+        # ===== First check if format conversion succeeded =====
         if instance_id in self._instance_dict:
             format_conversion_success = self._instance_dict[instance_id].get("format_conversion_success", True)
             if not format_conversion_success:
                 self.logger.warning(f"Turn {turn}: Format conversion failed, returning -1.0")
                 return -1.0
         
-        # 获取最后一条assistant消息
+        # Get the last assistant message
         assistant_msg = None
         for msg in reversed(messages):
             if msg.get("role") == "assistant":
@@ -3024,21 +3024,21 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         if not assistant_msg:
             return -1.0
         
-        # 定义有效的工具名称和必需参数
-        # 注意：需要物体ID的工具可以接受 jid（3D-FUTURE）或 uid（Objaverse）
-        # 这里列出的是必需参数，实际验证时会检查 jid 或 uid 是否存在
+        # Define valid tool names and required parameters
+        # Note: Tools requiring object IDs can accept jid (3D-FUTURE) or uid (Objaverse)
+        # Listed here are required parameters; validation will check if jid or uid exists
         valid_tools = {
             "add_object": ["object_description", "position", "rotation", "size"],
-            "remove_object": [],  # jid 或 uid，在下面单独验证
-            "move_object": ["new_position"],  # jid 或 uid，在下面单独验证
-            "rotate_object": ["new_rotation"],  # jid 或 uid，在下面单独验证
-            "scale_object": ["new_size"],  # jid 或 uid，在下面单独验证
-            "replace_object": ["new_object_description"],  # jid_to_replace 或 uid_to_replace，在下面单独验证
+            "remove_object": [],  # jid or uid, validated separately below
+            "move_object": ["new_position"],  # jid or uid, validated separately below
+            "rotate_object": ["new_rotation"],  # jid or uid, validated separately below
+            "scale_object": ["new_size"],  # jid or uid, validated separately below
+            "replace_object": ["new_object_description"],  # jid_to_replace or uid_to_replace, validated separately below
             "terminate": ["reason"]
         }
         
-        # 需要物体ID的工具（支持 jid 或 uid）
-        # 格式: tool_name -> (jid参数名, uid参数名)
+        # Tools requiring object ID (supports jid or uid)
+        # Format: tool_name -> (jid_param_name, uid_param_name)
         tools_requiring_object_id = {
             "remove_object": ("jid", "uid"),
             "move_object": ("jid", "uid"),
@@ -3048,22 +3048,22 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
         }
         
         if turn == 1:
-            # ===== 第一轮：检查初始场景创建格式 =====
+            # ===== Turn 1: Check initial scene creation format =====
             has_create_scene = "<create_scene>" in assistant_msg and "</create_scene>" in assistant_msg
             has_think = "<think>" in assistant_msg
             has_conclusion = "<conclusion>" in assistant_msg
             
-            # 检查1：不应有think和conclusion
+            # Check 1: Should not have think or conclusion
             if has_think or has_conclusion:
                 self.logger.warning("Turn 1: Found <think> or <conclusion> tags (should not exist)")
                 return -1.0
             
-            # 检查2：必须有create_scene标签
+            # Check 2: Must have create_scene tags
             if not has_create_scene:
                 self.logger.warning("Turn 1: Missing <create_scene> tags")
                 return -1.0
             
-            # 检查3：提取并验证JSON格式
+            # Check 3: Extract and validate JSON format
             try:
                 pattern = r'<create_scene>\s*```json\s*(.*?)\s*```\s*</create_scene>'
                 match = re.search(pattern, assistant_msg, re.DOTALL)
@@ -3074,7 +3074,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 scene_json_str = match.group(1).strip()
                 scene_data = json.loads(scene_json_str)
                 
-                # 检查4：必须是空场景（如果有groups字段）
+                # Check 4: Must be an empty scene (if groups field exists)
                 groups = scene_data.get("groups", [])
                 total_objects = 0
                 if groups:
@@ -3082,7 +3082,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         if isinstance(group, dict) and "objects" in group and group["objects"]:
                             total_objects += len(group["objects"])
                 
-                # 也检查flat格式的objects字段
+                # Also check flat format objects field
                 if "objects" in scene_data and scene_data["objects"]:
                     total_objects += len(scene_data["objects"])
                 
@@ -3090,8 +3090,8 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                     self.logger.warning(f"Turn 1: Initial scene should be empty, but has {total_objects} objects")
                     return -1.0
                 
-                # 检查5：验证房间形状（只检查顶点数）
-                # 支持两种格式：room_envelope.bounds_bottom 或直接 bounds_bottom
+                # Check 5: Validate room shape (only check vertex count)
+                # Supports two formats: room_envelope.bounds_bottom or direct bounds_bottom
                 room_envelope = scene_data.get("room_envelope", {})
                 bounds_bottom = room_envelope.get("bounds_bottom", scene_data.get("bounds_bottom", []))
                 bounds_top = room_envelope.get("bounds_top", scene_data.get("bounds_top", []))
@@ -3100,13 +3100,13 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                     self.logger.warning("Turn 1: Missing bounds_bottom or bounds_top in room_envelope")
                     return -1.0
                 
-                # 检查房间形状并根据顶点数返回不同奖励
-                # 4顶点=1.0, 5顶点=0.5, 6顶点=0.0, 其他=-1.0
+                # Check room shape and return different rewards based on vertex count
+                # 4 vertices=1.0, 5 vertices=0.5, 6 vertices=0.0, other=-1.0
                 room_shape_reward, shape_msg = self._check_room_shape_reward(bounds_bottom, bounds_top)
                 self.logger.info(f"Turn 1: Room shape check - {shape_msg}, reward={room_shape_reward}")
                 
-                # 检查6：验证room_type和room_id是否与用户需求匹配
-                # 从instance获取用户需求
+                # Check 6: Validate that room_type and room_id match the user requirement
+                # Get user requirement from instance
                 user_requirement = ""
                 if instance_id in self._instance_dict:
                     user_requirement = self._instance_dict[instance_id].get("user_requirement", "")
@@ -3114,19 +3114,19 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 room_type_reward = self._check_room_type_reward(scene_data, user_requirement)
                 self.logger.info(f"Turn 1: Room type check - reward={room_type_reward}")
                 
-                # 综合奖励：房间形状奖励 + room_type奖励
-                # room_type_reward: -1.0（两者都不对）, 0.0（一个不对）, 1.0（都对或无法判断）
+                # Combined reward: room shape reward + room_type reward
+                # room_type_reward: -1.0 (both wrong), 0.0 (one wrong), 1.0 (both correct or unable to determine)
                 if room_type_reward < 0:
-                    # 两者都不对，直接返回-1
+                    # Both wrong, return -1 directly
                     self.logger.warning("Turn 1: Both room_type and room_id mismatch with user requirement")
                     return -1.0
                 elif room_type_reward == 0:
-                    # 一个不对，返回0
+                    # One is wrong, return 0
                     self.logger.warning("Turn 1: Either room_type or room_id mismatch with user requirement")
                     return 0.0
                 else:
-                    # 都对或无法判断，再检查房间面积
-                    # 只惩罚过大的房间（>30m²），其他情况不影响格式奖励
+                    # Both correct or unable to determine, then check room area
+                    # Only penalize rooms that are too large (>30m²), other cases do not affect format reward
                     try:
                         import numpy as np
                         bounds_np = np.array(bounds_bottom)
@@ -3140,7 +3140,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                             return -1.0
                     except Exception as area_e:
                         self.logger.warning(f"Turn 1: Room area calculation failed: {area_e}")
-                        # 面积计算失败不影响格式奖励
+                        # Area calculation failure does not affect format reward
                     
                     return room_shape_reward
                 
@@ -3152,11 +3152,11 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 return -1.0
                 
         else:
-            # ===== 其他轮：检查编辑操作格式 =====
+            # ===== Other turns: Check editing operation format =====
             has_think = "<think>" in assistant_msg and "</think>" in assistant_msg
             has_tool_calls = "<tool_calls>" in assistant_msg and "</tool_calls>" in assistant_msg
             
-            # 检查1：必须包含think和tool_calls标签
+            # Check 1: Must contain both think and tool_calls tags
             if not (has_think and has_tool_calls):
                 missing = []
                 if not has_think: missing.append("think")
@@ -3164,7 +3164,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 self.logger.warning(f"Turn {turn}: Missing tags: {missing}")
                 return -1.0
             
-            # 检查2：检查顺序（think应该在tool_calls之前）
+            # Check 2: Check order (think should come before tool_calls)
             think_pos = assistant_msg.find("<think>")
             tool_calls_pos = assistant_msg.find("<tool_calls>")
             
@@ -3172,7 +3172,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 self.logger.warning(f"Turn {turn}: Wrong tag order (should be think->tool_calls)")
                 return -0.8
             
-            # 检查3：提取并验证tool_calls的JSON格式
+            # Check 3: Extract and validate tool_calls JSON format
             try:
                 pattern = r'<tool_calls>\s*(.*?)\s*</tool_calls>'
                 match = re.search(pattern, assistant_msg, re.DOTALL)
@@ -3183,26 +3183,26 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 tool_calls_str = match.group(1).strip()
                 tool_calls = json.loads(tool_calls_str)
                 
-                # 检查4：必须是列表
+                # Check 4: Must be a list
                 if not isinstance(tool_calls, list):
                     self.logger.warning(f"Turn {turn}: tool_calls must be a list")
                     return -1.0
                 
-                # 检查5：不能为空（除非是terminate）
+                # Check 5: Cannot be empty (unless it's terminate)
                 if len(tool_calls) == 0:
                     self.logger.warning(f"Turn {turn}: tool_calls list is empty")
                     return -1.0
                 
-                # 获取当前场景中的所有物体ID（jid 和 uid）
-                # 使用传入的instance_id，确保并发安全
+                # Get all object IDs in the current scene (jid and uid)
+                # Use the provided instance_id to ensure concurrency safety
                 if instance_id not in self._instance_dict:
                     self.logger.warning(f"Turn {turn}: instance_id {instance_id} not found in _instance_dict")
                     return -1.0
                 
                 current_scene = self._instance_dict[instance_id].get("current_scene", {})
-                valid_jids = set()  # 3D-FUTURE 物体 ID
-                valid_uids = set()  # Objaverse 物体 ID
-                valid_object_ids = set()  # 所有物体 ID（jid + uid）
+                valid_jids = set()  # 3D-FUTURE object IDs
+                valid_uids = set()  # Objaverse object IDs
+                valid_object_ids = set()  # All object IDs (jid + uid)
                 
                 if current_scene and 'groups' in current_scene:
                     for group in current_scene.get('groups', []):
@@ -3217,7 +3217,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 
                 self.logger.debug(f"Turn {turn}: Found {len(valid_jids)} jids, {len(valid_uids)} uids in current scene")
                 
-                # 检查6：验证每个工具调用
+                # Check 6: Validate each tool call
                 penalty = 0.0
                 for i, tool_call in enumerate(tool_calls):
                     if not isinstance(tool_call, dict):
@@ -3225,7 +3225,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         penalty += 0.1
                         continue
                     
-                    # 检查必需字段
+                    # Check required fields
                     if "name" not in tool_call:
                         self.logger.warning(f"Turn {turn}: tool_call[{i}] missing 'name' field")
                         penalty += 0.1
@@ -3233,13 +3233,13 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                     
                     tool_name = tool_call["name"]
                     
-                    # 检查工具名称是否有效
+                    # Check if tool name is valid
                     if tool_name not in valid_tools:
                         self.logger.warning(f"Turn {turn}: tool_call[{i}] has invalid tool name '{tool_name}'")
                         penalty += 0.15
                         continue
                     
-                    # 检查arguments字段
+                    # Check arguments field
                     if "arguments" not in tool_call:
                         self.logger.warning(f"Turn {turn}: tool_call[{i}] missing 'arguments' field")
                         penalty += 0.1
@@ -3251,25 +3251,25 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         penalty += 0.1
                         continue
                     
-                    # 检查必需参数
+                    # Check required parameters
                     required_params = valid_tools[tool_name]
                     missing_params = [p for p in required_params if p not in arguments]
                     if missing_params:
                         self.logger.warning(f"Turn {turn}: tool_call[{i}] ({tool_name}) missing required params: {missing_params}")
                         penalty += 0.1
                     
-                    # 检查需要物体ID的工具（支持 jid 或 uid）
+                    # Check tools that require object IDs (supports jid or uid)
                     if tool_name in tools_requiring_object_id:
                         jid_param, uid_param = tools_requiring_object_id[tool_name]
                         has_jid = jid_param in arguments and arguments[jid_param]
                         has_uid = uid_param in arguments and arguments[uid_param]
                         
-                        # 必须提供 jid 或 uid 中的一个
+                        # Must provide either jid or uid
                         if not has_jid and not has_uid:
                             self.logger.warning(f"Turn {turn}: tool_call[{i}] ({tool_name}) missing object ID (need '{jid_param}' or '{uid_param}')")
                             penalty += 0.15
                         else:
-                            # 验证提供的ID是否存在于当前场景
+                            # Validate that the provided ID exists in the current scene
                             id_valid = False
                             id_value = None
                             id_type = None
@@ -3289,9 +3289,9 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                                     self.logger.warning(f"  Valid jids: {list(valid_jids)[:5]}{'...' if len(valid_jids) > 5 else ''}")
                                 else:
                                     self.logger.warning(f"  Valid uids: {list(valid_uids)[:5]}{'...' if len(valid_uids) > 5 else ''}")
-                                penalty += 0.2  # ID不存在是严重错误，给较大惩罚
+                                penalty += 0.2  # Non-existent ID is a serious error, apply larger penalty
                 
-                # 计算最终分数
+                # Calculate final score
                 final_score = 1.0 - min(penalty, 1.0)
                 return max(final_score, -1.0)
                 
@@ -3304,63 +3304,63 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
     
     def _calculate_object_count_reward(self, scene_data: Dict[str, Any], is_final_turn: bool = False) -> Tuple[float, bool]:
         """
-        计算物体数量reward
+        Calculate object count reward
         
-        新的奖励规则：
-        - 物体数量 >= 15：reward = 1.0
-        - 物体数量 5-15：线性插值从 0.0 到 +1.0（5个=0，15个=1）
-        - 物体数量 4-5：线性插值从 -1.0 到 0.0（4个=-1，5个=0）
-        - 物体数量 < 4（仅最后一轮）：直接返回全局 -1 的总奖励
-        - 物体数量 < 4（非最后一轮）：reward = -1.0
+        Reward rules:
+        - Object count >= 15: reward = 1.0
+        - Object count 5-15: linear interpolation from 0.0 to +1.0 (5=0, 15=1)
+        - Object count 4-5: linear interpolation from -1.0 to 0.0 (4=-1, 5=0)
+        - Object count < 4 (final turn only): directly return global -1 total reward
+        - Object count < 4 (non-final turn): reward = -1.0
         
         Args:
-            scene_data: 场景数据
-            is_final_turn: 是否是最后一轮
+            scene_data: Scene data
+            is_final_turn: Whether this is the final turn
         
         Returns:
             (reward, should_override_total): 
-            - reward: 物体数量奖励值
-            - should_override_total: 如果为True，表示应该直接将总奖励设为-1
+            - reward: Object count reward value
+            - should_override_total: If True, total reward should be overridden to -1
         """
-        # 统计物体总数
+        # Count total objects
         total_objects = 0
         if 'groups' in scene_data and scene_data['groups']:
             for group in scene_data['groups']:
                 if 'objects' in group and group['objects']:
                     total_objects += len(group['objects'])
         elif 'objects' in scene_data and scene_data['objects']:
-            # 兼容直接objects格式
+            # Compatible with direct objects format
             total_objects = len(scene_data['objects'])
         
         self.logger.info(f"Object count: {total_objects} (is_final_turn={is_final_turn})")
 
-        # 特殊规则：最后一轮物体数量少于4个，直接返回-1并标记覆盖总奖励
+        # Special rule: if final turn and object count < 4, return -1 and mark to override total reward
         if is_final_turn and total_objects < 4:
             self.logger.warning(f"Final turn: Object count ({total_objects}) < 4, overriding total reward to -1")
             return -1.0, True
         
-        # 定义奖励区间
+        # Define reward intervals
         if total_objects >= 15:
-            # 物体数量充足，满分
+            # Sufficient objects, full score
             return 1.0, False
         elif 5 <= total_objects < 15:
-            # 5-15个物体，线性插值从 0.0 到 +1.0
+            # 5-15 objects, linear interpolation from 0.0 to +1.0
             # total_objects=5 -> 0.0, total_objects=15 -> +1.0
             return (total_objects - 5) / 10.0, False
         elif 4 <= total_objects < 5:
-            # 4-5个物体，线性插值从 -1.0 到 0.0
+            # 4-5 objects, linear interpolation from -1.0 to 0.0
             # total_objects=4 -> -1.0, total_objects=5 -> 0.0
             return -1.0 + (total_objects - 4) / 1.0, False
         else:  # total_objects < 4
-            # 非最后一轮，物体太少，返回 -1.0 但不覆盖总奖励
+            # Non-final turn, too few objects, return -1.0 but do not override total reward
             return -1.0, False
     
     def _get_room_boundaries(self, scene_data: Dict[str, Any]) -> Dict[str, float]:
         """
-        从room_envelope提取房间边界
+        Extract room boundaries from room_envelope
         
         Returns:
-            包含floor_y, ceiling_y, x_min, x_max, z_min, z_max的字典
+            Dictionary containing floor_y, ceiling_y, x_min, x_max, z_min, z_max
         """
         room_envelope = scene_data.get('room_envelope', {})
         bounds_bottom = room_envelope.get('bounds_bottom', [])
@@ -3384,21 +3384,21 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
     
     async def _classify_object_support_type(self, obj_desc: str) -> str:
         """
-        分类物体的支撑类型（优先关键词匹配，fallback到LLM）
+        Classify object support type (keyword matching first, fallback to LLM)
         
         Args:
-            obj_desc: 物体描述文本
+            obj_desc: Object description text
         
         Returns:
-            支撑类型：'floor', 'surface', 'ceiling', 'wall'
+            Support type: 'floor', 'surface', 'ceiling', 'wall'
         """
-        # 检查缓存
+        # Check cache
         if obj_desc in self.support_type_cache:
             return self.support_type_cache[obj_desc]
         
         desc_lower = obj_desc.lower()
         
-        # 英文关键词匹配
+        # English keyword matching
         floor_keywords = ['chair', 'sofa', 'bed', 'table', 'desk', 'cabinet', 'shelf',
                          'wardrobe', 'dresser', 'nightstand', 'stool', 'bench', 'ottoman',
                          'couch', 'armchair', 'bookcase', 'sideboard', 'credenza', 'console',
@@ -3416,7 +3416,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                         'wall art', 'frame', 'wall shelf', 'wall cabinet', 'wall clock',
                         'wall decor', 'tapestry', 'poster', 'photograph']
         
-        # 关键词匹配
+        # Keyword matching
         for keyword in ceiling_keywords:
             if keyword in desc_lower:
                 self.support_type_cache[obj_desc] = 'ceiling'
@@ -3437,7 +3437,7 @@ Output ONLY one number: -1.0, -0.5, 0.0, 0.5, or 1.0"""
                 self.support_type_cache[obj_desc] = 'floor'
                 return 'floor'
         
-        # 未匹配到关键词，调用LLM判断
+        # No keyword matched, call LLM for classification
         try:
             prompt = f"""Classify the support type needed for this furniture/object: "{obj_desc}"
 
@@ -3449,8 +3449,8 @@ Support types:
 
 Reply with only one word: floor, surface, ceiling, or wall"""
             
-            # 使用VLM API进行文本分类（不需要图像）
-            # 构建纯文本请求
+            # Use VLM API for text classification (no image needed)
+            # Build text-only request
             data = {
                 "model": self.vlm_judge_model,
                 "messages": [
@@ -3474,7 +3474,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 result = response.json()
                 content = result['choices'][0]['message']['content'].lower().strip()
                 
-                # 提取支撑类型
+                # Extract support type
                 for support_type in ['ceiling', 'wall', 'surface', 'floor']:
                     if support_type in content:
                         self.support_type_cache[obj_desc] = support_type
@@ -3484,13 +3484,13 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         except Exception as e:
             self.logger.warning(f"LLM classification failed for '{obj_desc}': {e}")
         
-        # 默认fallback到floor
+        # Default fallback to floor
         self.support_type_cache[obj_desc] = 'floor'
         return 'floor'
     
     def _find_support_surfaces(self, all_objects: List[Dict]) -> List[Tuple]:
         """
-        识别潜在的支撑面（桌子、架子等）
+        Identify potential support surfaces (tables, shelves, etc.)
         
         Returns:
             List of (jid, top_y, bbox_bounds, obj)
@@ -3508,22 +3508,22 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             pos = obj.get('pos', [0, 0, 0])
             jid = obj.get('jid', '')
             
-            # 关键词匹配或尺寸启发式
+            # Keyword matching or size heuristic
             is_surface = False
             
-            # 关键词检查
+            # Keyword check
             for keyword in surface_keywords:
                 if keyword in desc:
                     is_surface = True
                     break
             
-            # 尺寸启发式：高度 < 1.2m 且 面积 > 0.2m²
+            # Size heuristic: height < 1.2m and area > 0.2m²
             if not is_surface and size[1] < 1.2 and size[0] * size[2] > 0.2:
                 is_surface = True
             
             if is_surface:
                 top_y = pos[1] + size[1]
-                # 计算bbox边界
+                # Calculate bbox boundaries
                 x_min = pos[0] - size[0] / 2
                 x_max = pos[0] + size[0] / 2
                 z_min = pos[2] - size[2] / 2
@@ -3535,29 +3535,29 @@ Reply with only one word: floor, surface, ceiling, or wall"""
     
     async def _calculate_support_reward(self, scene_data: Dict[str, Any]) -> float:
         """
-        计算支撑reward - 评估物体是否有合理的支撑
+        Calculate support reward - evaluate whether objects have reasonable support
         
-        策略:
-        1. 识别房间边界（地板、天花板、墙面）
-        2. 识别潜在支撑面（桌子、架子等）
-        3. 对每个物体分类支撑类型并验证位置
-        4. 计算无支撑物体的比例
+        Strategy:
+        1. Identify room boundaries (floor, ceiling, walls)
+        2. Identify potential support surfaces (tables, shelves, etc.)
+        3. Classify support type for each object and verify position
+        4. Calculate the ratio of unsupported objects
         
         Returns:
-            支撑合理返回1.0，不合理返回负值
+            Returns 1.0 if support is reasonable, negative value if unreasonable
             - 0% unsupported: 1.0
             - 0-10% unsupported: 0 to 1.0 (linear)
             - >10% unsupported: negative reward
         """
         try:
-            # 获取房间边界
+            # Get room boundaries
             boundaries = self._get_room_boundaries(scene_data)
             floor_y = boundaries['floor_y']
             ceiling_y = boundaries['ceiling_y']
             x_min, x_max = boundaries['x_min'], boundaries['x_max']
             z_min, z_max = boundaries['z_min'], boundaries['z_max']
             
-            # 提取所有物体
+            # Extract all objects
             all_objects = []
             for group in scene_data.get('groups', []):
                 all_objects.extend(group.get('objects', []))
@@ -3565,10 +3565,10 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             if not all_objects:
                 return 0.0
             
-            # 识别支撑面
+            # Identify support surfaces
             support_surfaces = self._find_support_surfaces(all_objects)
             
-            # 验证每个物体的支撑
+            # Verify support for each object
             unsupported_objects = []
             keyword_matched = 0
             llm_called = 0
@@ -3579,11 +3579,11 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 size = obj.get('size', [0, 0, 0])
                 jid = obj.get('jid', '')
                 
-                # 物体底部和顶部Y坐标
+                # Object bottom and top Y coordinates
                 bottom_y = pos[1]
                 top_y = pos[1] + size[1]
                 
-                # 分类支撑类型
+                # Classify support type
                 cache_before = len(self.support_type_cache)
                 support_type = await self._classify_object_support_type(desc)
                 cache_after = len(self.support_type_cache)
@@ -3591,11 +3591,11 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 if cache_after == cache_before:
                     keyword_matched += 1
                 else:
-                    # 检查是否是新的LLM调用
+                    # Check if it's a new LLM call
                     if desc not in self.support_type_cache or cache_after > cache_before:
                         llm_called += 1
                 
-                # 根据类型验证支撑
+                # Verify support based on type
                 is_supported = False
                 support_reason = ""
                 
@@ -3603,16 +3603,16 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 tolerance_wall = 0.15  # 15cm tolerance for wall proximity
                 
                 if support_type == 'floor':
-                    # 检查是否在地板上
+                    # Check if on the floor
                     if abs(bottom_y - floor_y) < tolerance_y:
                         is_supported = True
                         support_reason = "on floor"
                 
                 elif support_type == 'surface':
-                    # 检查是否在某个支撑面上
+                    # Check if on a support surface
                     for surf_jid, surf_top_y, surf_bounds, surf_obj in support_surfaces:
                         if abs(bottom_y - surf_top_y) < tolerance_y:
-                            # 检查XZ平面重叠
+                            # Check XZ plane overlap
                             obj_x_min = pos[0] - size[0] / 2
                             obj_x_max = pos[0] + size[0] / 2
                             obj_z_min = pos[2] - size[2] / 2
@@ -3620,7 +3620,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                             
                             surf_x_min, surf_x_max, surf_z_min, surf_z_max = surf_bounds
                             
-                            # 检查重叠
+                            # Check overlap
                             x_overlap = not (obj_x_max < surf_x_min or obj_x_min > surf_x_max)
                             z_overlap = not (obj_z_max < surf_z_min or obj_z_min > surf_z_max)
                             
@@ -3630,14 +3630,14 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                                 break
                 
                 elif support_type == 'ceiling':
-                    # 检查是否接近天花板（允许物体悬挂在天花板下方）
-                    # 物体顶部应该在天花板高度的80%-100%范围内
+                    # Check if close to ceiling (allow objects hanging below ceiling)
+                    # Object top should be within 80%-100% of ceiling height
                     if top_y >= ceiling_y * 0.8 and top_y <= ceiling_y + tolerance_y:
                         is_supported = True
                         support_reason = "hanging from ceiling"
                 
                 elif support_type == 'wall':
-                    # 检查是否贴近墙面
+                    # Check if close to a wall
                     near_x_wall = (abs(pos[0] - x_min) < tolerance_wall or 
                                   abs(pos[0] - x_max) < tolerance_wall)
                     near_z_wall = (abs(pos[2] - z_min) < tolerance_wall or 
@@ -3655,12 +3655,12 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         'pos': pos
                     })
             
-            # 计算无支撑物体比例
+            # Calculate unsupported object ratio
             total_objects = len(all_objects)
             unsupported_count = len(unsupported_objects)
             unsupported_rate = (unsupported_count / total_objects * 100) if total_objects > 0 else 0
             
-            # 计算奖励
+            # Calculate reward
             if unsupported_rate == 0:
                 reward = 1.0
             elif unsupported_rate <= 10:
@@ -3668,7 +3668,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             else:
                 reward = -1.0 * (unsupported_rate - 10) / 90.0
             
-            # 打印详细信息
+            # Print detailed information
             if self.verbose:
                 print(f"\n  [Support Reward Details]", file=sys.stderr, flush=True)
                 print(f"    Total objects: {total_objects}", file=sys.stderr, flush=True)
@@ -3680,7 +3680,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 
                 if unsupported_objects:
                     print(f"    Unsupported objects:", file=sys.stderr, flush=True)
-                    for obj_info in unsupported_objects[:5]:  # 最多显示5个
+                    for obj_info in unsupported_objects[:5]:  # Show at most 5
                         print(f"      - {obj_info['desc']} (type: {obj_info['type']})", file=sys.stderr, flush=True)
                     if len(unsupported_objects) > 5:
                         print(f"      ... and {len(unsupported_objects) - 5} more", file=sys.stderr, flush=True)
@@ -3697,18 +3697,18 @@ Reply with only one word: floor, surface, ceiling, or wall"""
     
     def _calculate_room_area_reward(self, scene_data: Dict[str, Any]) -> float:
         """
-        计算房间面积reward（仅用于第一轮）
+        Calculate room area reward (only used for the first turn)
         
-        注意：只对长方形房间计算面积奖励，非长方形房间直接返回负奖励。
-        这是因为异型房间的包围盒面积会高估实际面积，导致奖励信号不准确。
+        Note: Area reward is only calculated for rectangular rooms; non-rectangular rooms directly return negative reward.
+        This is because the bounding box area of irregular rooms overestimates actual area, leading to inaccurate reward signals.
         
-        房间面积在20-40平米时给正奖励：
-        - 最优区间：25-35平米，reward = 1.0
-        - 边界区间：20-25和35-40，线性衰减到0.5
-        - 超出范围：给负奖励
+        Positive reward when room area is 20-40 sqm:
+        - Optimal range: 25-35 sqm, reward = 1.0
+        - Boundary range: 20-25 and 35-40, linear decay to 0.5
+        - Out of range: negative reward
         
         Returns:
-            面积合理返回0.5-1.0，不合理返回负值
+            Returns 0.5-1.0 if area is reasonable, negative value if unreasonable
         """
         try:
             room_envelope = scene_data.get('room_envelope', {})
@@ -3719,52 +3719,52 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 self.logger.warning("Room area calculation: missing bounds")
                 return -1.0
             
-            # 首先检查是否为长方形，非长方形直接返回负奖励
+            # First check if room is rectangular; non-rectangular rooms directly return negative reward
             is_rectangle, rect_error = self._check_room_is_rectangle(bounds_bottom, bounds_top)
             if not is_rectangle:
                 self.logger.warning(f"Room area calculation: room is not a rectangle - {rect_error}")
-                return -1.0  # 非长方形房间，面积奖励直接为负
+                return -1.0  # Non-rectangular room, area reward is directly negative
             
-            # 计算房间尺寸（只有长方形才能准确计算）
+            # Calculate room dimensions (only accurate for rectangular rooms)
             import numpy as np
             bounds_bottom = np.array(bounds_bottom)
             bounds_top = np.array(bounds_top)
             
-            # 取X和Z轴的范围（对于长方形，这就是准确的尺寸）
+            # Get X and Z axis ranges (for rectangles, this gives accurate dimensions)
             x_size = abs(bounds_bottom[:, 0].max() - bounds_bottom[:, 0].min())
             z_size = abs(bounds_bottom[:, 2].max() - bounds_bottom[:, 2].min())
             
-            # 计算面积（平方米）
+            # Calculate area (square meters)
             area = x_size * z_size
             
             self.logger.info(f"Room area: {area:.2f} m² (size: {x_size:.2f}m × {z_size:.2f}m)")
             
-            # 定义奖励区间（连续曲线，覆盖-1到1完整范围）
-            # 最优区间: 20-30m², reward=1.0
-            # 边界区间: 15-20和30-35m², reward从0.5线性到1.0
-            # 过渡区间: 10-15和35-40m², reward从0线性到0.5
-            # 惩罚区间: <10或>40m², reward从0线性到-1.0
+            # Define reward intervals (continuous curve, covering full -1 to 1 range)
+            # Optimal range: 20-30m², reward=1.0
+            # Boundary range: 15-20 and 30-35m², reward linearly from 0.5 to 1.0
+            # Transition range: 10-15 and 35-40m², reward linearly from 0 to 0.5
+            # Penalty range: <10 or >40m², reward linearly from 0 to -1.0
             if 20 <= area <= 30:
-                # 最优区间
+                # Optimal range
                 return 1.0
             elif 15 <= area < 20:
-                # 下边界区间，线性插值 0.5 -> 1.0
+                # Lower boundary range, linear interpolation 0.5 -> 1.0
                 return 0.5 + 0.5 * (area - 15) / 5
             elif 30 < area <= 35:
-                # 上边界区间，线性插值 1.0 -> 0.5
+                # Upper boundary range, linear interpolation 1.0 -> 0.5
                 return 1.0 - 0.5 * (area - 30) / 5
             elif 10 <= area < 15:
-                # 下过渡区间，线性插值 0 -> 0.5
+                # Lower transition range, linear interpolation 0 -> 0.5
                 return 0.5 * (area - 10) / 5
             elif 35 < area <= 40:
-                # 上过渡区间，线性插值 0.5 -> 0
+                # Upper transition range, linear interpolation 0.5 -> 0
                 return 0.5 - 0.5 * (area - 35) / 5
             elif area < 10:
-                # 房间太小，负奖励（线性插值 0 -> -1.0）
+                # Room too small, negative reward (linear interpolation 0 -> -1.0)
                 # area=10 -> 0, area=0 -> -1.0
                 return max(-1.0, -0.1 * (10 - area))
             else:  # area > 40
-                # 房间太大，负奖励（线性插值 0 -> -1.0）
+                # Room too large, negative reward (linear interpolation 0 -> -1.0)
                 # area=40 -> 0, area=50 -> -1.0
                 return max(-1.0, -0.1 * (area - 40))
                 
@@ -3774,108 +3774,108 @@ Reply with only one word: floor, surface, ceiling, or wall"""
     
     async def calculate_score(self, instance_id: str, **kwargs) -> float:  
         """
-        计算综合奖励，包括：
-        1. 物理有效性奖励（体素评估或trimesh评估）
-        2. 格式奖励
-        3. 物体数量奖励
-        4. 工具执行成功奖励 (仅第二轮及以后)
-        5. VLM judge评分 (中间轮次和最后一轮)
+        Calculate comprehensive reward, including:
+        1. Physics validity reward (voxel evaluation or trimesh evaluation)
+        2. Format reward
+        3. Object count reward
+        4. Tool execution success reward (only from turn 2 onward)
+        5. VLM judge scoring (intermediate turns and final turn)
         
-        最终归一化到合理范围
+        Normalize to reasonable range at the end
         """  
         instance = self._instance_dict[instance_id]  
         current_scene = instance["current_scene"]  
         turn = instance["turn_count"]
         messages = kwargs.get("messages", [])
         tool_execution_success = kwargs.get("tool_execution_success", None)
-        is_terminated = kwargs.get("is_terminated", False)  # 新增：获取terminate状态
-        scene_before_edit = kwargs.get("scene_before_edit", None)  # 编辑前的场景
-        current_img_path = kwargs.get("current_img_path", None)  # 本轮生成的图像路径
+        is_terminated = kwargs.get("is_terminated", False)  # New: get terminate status
+        scene_before_edit = kwargs.get("scene_before_edit", None)  # Scene before editing
+        current_img_path = kwargs.get("current_img_path", None)  # Image path generated this turn
         
-        # 判断是否是最后一轮（与is_done逻辑一致：terminate或达到max_turns）
+        # Determine if this is the final turn (consistent with is_done logic: terminate or reaching max_turns)
         max_turns = instance.get("max_turns", self.max_turns)
         is_final_turn = is_terminated or (turn >= max_turns)
         
-        # 获取VLM judge需要的场景和图像
+        # Get scene and image needed for VLM judge
         vlm_image_path = None
-        vlm_prev_image_path = None  # 中间轮次需要上一轮的图像用于对比
+        vlm_prev_image_path = None  # Intermediate turns need previous turn's image for comparison
         vlm_scene = None
         
-        # 从history中获取图像路径
-        # 注意：calculate_score是在history.append之前调用的，所以history[-1]是上一轮
+        # Get image paths from history
+        # Note: calculate_score is called before history.append, so history[-1] is the previous turn
         if turn == 1:
-            # 第1轮没有VLM评估
+            # Turn 1 has no VLM evaluation
             vlm_image_path = None
             vlm_prev_image_path = None
             vlm_scene = None
             self.logger.info("Turn 1: No VLM evaluation")
         elif is_final_turn:
-            # 最后一轮：使用本轮生成的图像和编辑后的场景
+            # Final turn: use current turn's generated image and edited scene
             vlm_image_path = current_img_path
-            vlm_prev_image_path = None  # 最后一轮不需要对比
-            vlm_scene = current_scene  # 最后一轮评估编辑后的场景
+            vlm_prev_image_path = None  # Final turn doesn't need comparison
+            vlm_scene = current_scene  # Final turn evaluates edited scene
             self.logger.info(f"Final turn {turn}: Using current image {vlm_image_path} and edited scene")
         else:
-            # 中间轮次：需要上一轮的图像和本轮的图像进行对比
-            vlm_image_path = current_img_path  # 本轮生成的图像
-            vlm_scene = scene_before_edit  # 使用编辑前的场景
+            # Intermediate turn: need previous turn's image and current turn's image for comparison
+            vlm_image_path = current_img_path  # Image generated this turn
+            vlm_scene = scene_before_edit  # Use scene before editing
             
             if turn == 2:
-                # 第2轮：上一轮是第1轮的图像（初始场景）
+                # Turn 2: previous turn is turn 1's image (initial scene)
                 if instance["history"] and len(instance["history"]) >= 1:
                     first_turn_history = instance["history"][0]
                     vlm_prev_image_path = first_turn_history.get("img_path", None)
                     self.logger.info(f"Turn 2: Comparing turn 1 image {vlm_prev_image_path} with current {vlm_image_path}")
             else:
-                # 第3轮及以后的中间轮：使用上一轮的图像
+                # Turn 3 and later intermediate turns: use previous turn's image
                 if instance["history"] and len(instance["history"]) >= 1:
                     prev_turn_history = instance["history"][-1]
                     vlm_prev_image_path = prev_turn_history.get("img_path", None)
                     self.logger.info(f"Turn {turn}: Comparing previous turn image {vlm_prev_image_path} with current {vlm_image_path}")
         
-        # 定义权重（根据是否有工具执行调整）
+        # Define weights (adjusted based on whether tool execution exists)
         if turn == 1:
-            # 第一轮：初始场景生成，包含格式、房间面积、分组数奖励
+            # Turn 1: initial scene generation, includes format, room area, group count rewards
             weights = {
                 "physics": 0.0,
                 "format": 1.0,
                 "object_count": 0.0,
                 "collision_rate": 0.0,
                 "oob_rate": 0.0,
-                "penetration_depth": 0.0,  # 穿透深度体积奖励
-                "oob_volume": 0.0,  # 出界体积奖励
+                "penetration_depth": 0.0,  # Penetration depth volume reward
+                "oob_volume": 0.0,  # Out-of-bounds volume reward
                 "support": 0.0,
                 "room_area": 0.0,
                 "tool_execution": 0.0,
-                # VLM judge (第一轮不使用)
+                # VLM judge (not used in turn 1)
                 "vlm_problem_identification": 0.0,
                 "vlm_action_reasonableness": 0.0,
-                "vlm_scene_improvement": 0.0,  # 场景改进度评估
-                "vlm_key_objects": 0.0,  # 关键物体评估
+                "vlm_scene_improvement": 0.0,  # Scene improvement evaluation
+                "vlm_key_objects": 0.0,  # Key objects evaluation
                 "vlm_rationality": 0.0,
                 "vlm_aesthetics": 0.0,
                 "vlm_requirement_match": 0.0,
-                "vlm_scene_graph": 0.0  # 场景图约束评估
+                "vlm_scene_graph": 0.0  # Scene graph constraint evaluation
             }
         else:
-            # 使用前面计算的is_final_turn判断（已包含terminate和max_turns两种情况）
+            # Use previously computed is_final_turn (already includes both terminate and max_turns cases)
             
             if is_final_turn:
-                # ========== 最后一轮：分层评估体系 ==========
-                # 格式层 (0.1) + 物体层 (0.3) + 场景层 (0.6)
-                # 物体层：key_objects (0.10) + size_proportion (0.10) + object_count (0.10)
-                # 场景层：物理 (0.30) + VLM (0.30)
-                #   - 物理: collision + oob + support (trimesh) 或 voxel physics
-                #   - VLM: rationality + requirement_match + scene_graph (删除了aesthetics)
+                # ========== Final turn: Layered evaluation system ==========
+                # Format layer (0.1) + Object layer (0.3) + Scene layer (0.6)
+                # Object layer: key_objects (0.10) + size_proportion (0.10) + object_count (0.10)
+                # Scene layer: Physics (0.30) + VLM (0.30)
+                #   - Physics: collision + oob + support (trimesh) or voxel physics
+                #   - VLM: rationality + requirement_match + scene_graph (removed aesthetics)
                 if self.physics_mode == "voxel":
                     weights = {
-                        "physics": 0.30,  # 体素物理评估（场景层物理部分）
-                        "format": 0.10,  # 格式层
-                        # 物体层 (0.3)
-                        "object_count": 0.0,  # 权重移至vlm_key_objects
-                        "vlm_key_objects": 0.20,  # 关键物体匹配度（物体层，含数量权重）
-                        "vlm_size_proportion": 0.10,  # 尺寸比例合理性（物体层）
-                        # 物理指标（voxel模式不使用单独指标）
+                        "physics": 0.30,  # Voxel physics evaluation (scene layer physics part)
+                        "format": 0.10,  # Format layer
+                        # Object layer (0.3)
+                        "object_count": 0.0,  # Weight moved to vlm_key_objects
+                        "vlm_key_objects": 0.20,  # Key objects match (object layer, includes count weight)
+                        "vlm_size_proportion": 0.10,  # Size proportion reasonableness (object layer)
+                        # Physics metrics (not used individually in voxel mode)
                         "collision_rate": 0.0,
                         "oob_rate": 0.0,
                         "penetration_depth": 0.0,
@@ -3883,24 +3883,24 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         "support": 0.0,
                         "room_area": 0.0,
                         "tool_execution": 0.0,
-                        # VLM场景层 (0.3)
+                        # VLM scene layer (0.3)
                         "vlm_problem_identification": 0.0,
                         "vlm_action_reasonableness": 0.0,
                         "vlm_scene_improvement": 0.0,
-                        "vlm_rationality": 0.10,  # 场景层VLM
-                        "vlm_aesthetics": 0.0,  # 已删除
-                        "vlm_requirement_match": 0.10,  # 场景层VLM
-                        "vlm_scene_graph": 0.10  # 场景层VLM
+                        "vlm_rationality": 0.10,  # Scene layer VLM
+                        "vlm_aesthetics": 0.0,  # Removed
+                        "vlm_requirement_match": 0.10,  # Scene layer VLM
+                        "vlm_scene_graph": 0.10  # Scene layer VLM
                     }
                 else:  # trimesh
                     weights = {
                         "physics": 0.0,
-                        "format": 0.10,  # 格式层
-                        # 物体层 (0.3)
-                        "object_count": 0.0,  # 权重移至vlm_key_objects
-                        "vlm_key_objects": 0.20,  # 关键物体匹配度（物体层，含数量权重）
-                        "vlm_size_proportion": 0.10,  # 尺寸比例合理性（物体层）
-                        # 场景层物理部分 (0.3)
+                        "format": 0.10,  # Format layer
+                        # Object layer (0.3)
+                        "object_count": 0.0,  # Weight moved to vlm_key_objects
+                        "vlm_key_objects": 0.20,  # Key objects match (object layer, includes count weight)
+                        "vlm_size_proportion": 0.10,  # Size proportion reasonableness (object layer)
+                        # Scene layer physics part (0.3)
                         "collision_rate": 0.08,
                         "oob_rate": 0.07,
                         "penetration_depth": 0.05,
@@ -3908,45 +3908,45 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         "support": 0.05,
                         "room_area": 0.0,
                         "tool_execution": 0.0,
-                        # VLM场景层 (0.3)
+                        # VLM scene layer (0.3)
                         "vlm_problem_identification": 0.0,
                         "vlm_action_reasonableness": 0.0,
                         "vlm_scene_improvement": 0.0,
-                        "vlm_rationality": 0.10,  # 场景层VLM
-                        "vlm_aesthetics": 0.0,  # 已删除
-                        "vlm_requirement_match": 0.10,  # 场景层VLM
-                        "vlm_scene_graph": 0.10  # 场景层VLM
+                        "vlm_rationality": 0.10,  # Scene layer VLM
+                        "vlm_aesthetics": 0.0,  # Removed
+                        "vlm_requirement_match": 0.10,  # Scene layer VLM
+                        "vlm_scene_graph": 0.10  # Scene layer VLM
                     }
             else:
-                # 中间轮次：评估格式 + 场景改进度 + 碰撞率/出界率 + 体积奖励 + 关键物体
-                # 权重总计: 0.10 + 0.1*4 + 0.25*2 = 0.10 + 0.40 + 0.50 = 1.0
+                # Intermediate turns: evaluate format + scene improvement + collision rate/OOB rate + volume rewards + key objects
+                # Weight total: 0.10 + 0.1*4 + 0.25*2 = 0.10 + 0.40 + 0.50 = 1.0
                 weights = {
-                    "physics": 0.0,  # 不评估
-                    "format": 0.10,  # 格式正确性
-                    "object_count": 0.0,  # 不评估
-                    "collision_rate": 0.1,  # 碰撞率（中间轮次启用）
-                    "oob_rate": 0.1,  # 出界率（中间轮次启用）
-                    "penetration_depth": 0.1,  # 穿透深度体积奖励（中间轮次启用）
-                    "oob_volume": 0.1,  # 出界体积奖励（中间轮次启用）
+                    "physics": 0.0,  # Not evaluated
+                    "format": 0.10,  # Format correctness
+                    "object_count": 0.0,  # Not evaluated
+                    "collision_rate": 0.1,  # Collision rate (enabled for intermediate turns)
+                    "oob_rate": 0.1,  # OOB rate (enabled for intermediate turns)
+                    "penetration_depth": 0.1,  # Penetration depth volume reward (enabled for intermediate turns)
+                    "oob_volume": 0.1,  # OOB volume reward (enabled for intermediate turns)
                     "support": 0.0,
                     "room_area": 0.0,
                     "tool_execution": 0.0,
-                    # VLM judge 中间评分
-                    "vlm_problem_identification": 0.0,  # 已废弃
-                    "vlm_action_reasonableness": 0.0,  # 已废弃
-                    "vlm_scene_improvement": 0.25,  # 场景改进度评估（VLM评估的一半）
-                    "vlm_key_objects": 0.25,  # 关键物体评估（VLM评估的一半，占总权重0.25）
+                    # VLM judge intermediate scoring
+                    "vlm_problem_identification": 0.0,  # Deprecated
+                    "vlm_action_reasonableness": 0.0,  # Deprecated
+                    "vlm_scene_improvement": 0.25,  # Scene improvement evaluation (half of VLM evaluation)
+                    "vlm_key_objects": 0.25,  # Key objects evaluation (half of VLM evaluation, 0.25 of total weight)
                     "vlm_rationality": 0.0,
                     "vlm_aesthetics": 0.0,
                     "vlm_requirement_match": 0.0,
-                    "vlm_scene_graph": 0.0  # 场景图约束评估（中间轮次不使用）
+                    "vlm_scene_graph": 0.0  # Scene graph constraint evaluation (not used for intermediate turns)
                 }
         
         rewards = {}
         
-        # 1. 计算物理有效性奖励（仅在最后一轮且voxel模式下计算）
+        # 1. Calculate physics validity reward (only in final turn and voxel mode)
         
-        # 先统计物体数量，用于物理评估的前置检查
+        # First count objects for physics evaluation pre-check
         total_objects_for_physics = 0
         if 'groups' in current_scene and current_scene['groups']:
             for group in current_scene['groups']:
@@ -3956,14 +3956,14 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             total_objects_for_physics = len(current_scene['objects'])
         
         if self.physics_mode == "voxel" and self.voxel_reward is not None and is_final_turn:
-            # 物体少于2个时直接返回-1（没有评估的必要）
+            # Fewer than 2 objects, directly return -1 (no need for evaluation)
             if total_objects_for_physics < 2:
                 self.logger.warning(f"Object count ({total_objects_for_physics}) < 2, skipping voxel physics evaluation")
                 rewards["physics"] = -1.0
             else:
-                # 只在最后一轮计算体素物理评估
+                # Only compute voxel physics evaluation in the final turn
                 try:  
-                    # 使用VoxelReward计算
+                    # Use VoxelReward to compute
                     physics_reward, metrics = await asyncio.to_thread(  
                         self.voxel_reward.compute_reward,  
                         current_scene,  
@@ -3975,7 +3975,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     physics_reward = float(physics_reward)
                     rewards["physics"] = physics_reward
                     
-                    # 保存物理评估结果  
+                    # Save physics evaluation results  
                     metrics_path = instance["output_dir"] / f"turn_{turn:03d}_voxel_metrics.json"  
                     with open(metrics_path, 'w', encoding='utf-8') as f:  
                         json.dump(metrics, f, indent=2)  
@@ -3988,7 +3988,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         else:
             rewards["physics"] = 0.0
         
-        # 2. 计算格式奖励
+        # 2. Calculate format reward
         try:
             format_reward = self._calculate_format_reward(messages, turn, instance_id)
             rewards["format"] = format_reward
@@ -3997,8 +3997,8 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 print(f"Warning: Format reward calculation failed: {e}")
             rewards["format"] = -1.0
         
-        # 3. 计算物体数量奖励（仅在最后一轮计算）
-        # 标记是否需要覆盖总奖励为-1（当最后一轮物体数量<5时）
+        # 3. Calculate object count reward (only in final turn)
+        # Flag whether to override total reward to -1 (when final turn object count < 5)
         should_override_total_reward = False
         
         if is_final_turn:
@@ -4012,22 +4012,22 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     print(f"Warning: Object count reward calculation failed: {e}")
                 rewards["object_count"] = 0.0
         else:
-            # 中间轮次不计算物体数量
+            # Intermediate turns don't calculate object count
             rewards["object_count"] = 0.0
         
-        # 4. 计算碰撞率、出界率和体积奖励（中间轮次和最后一轮在trimesh模式下计算）
-        # 体积奖励阈值设计：
-        # - 穿透深度: 0m=+1.0, 0.05m(5cm)=0.0, 0.2m(20cm)=-1.0
-        # - 出界体积: 0m³=+1.0, 0.1m³=0.0, 0.5m³=-1.0
+        # 4. Calculate collision rate, OOB rate, and volume rewards (intermediate and final turns in trimesh mode)
+        # Volume reward threshold design:
+        # - Penetration depth: 0m=+1.0, 0.05m(5cm)=0.0, 0.2m(20cm)=-1.0
+        # - OOB volume: 0m³=+1.0, 0.1m³=0.0, 0.5m³=-1.0
         if self.physics_mode == "trimesh" and self.trimesh_metrics is not None and turn > 1:
-            # 物体少于3个时直接返回-1（没有评估的必要）
+            # Fewer than 3 objects, directly return -1 (no need for evaluation)
             if total_objects_for_physics < 3:
                 self.logger.warning(f"Object count ({total_objects_for_physics}) < 3, skipping trimesh physics evaluation")
                 rewards["collision_rate"] = -1.0
                 rewards["oob_rate"] = -1.0
                 rewards["penetration_depth"] = -1.0
                 rewards["oob_volume"] = -1.0
-                instance["_trimesh_metrics_for_feedback"] = None  # 确保设置为None
+                instance["_trimesh_metrics_for_feedback"] = None  # Ensure set to None
             else:
                 try:
                     trimesh_reward, trimesh_metrics = await asyncio.to_thread(
@@ -4036,82 +4036,82 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         format_type='ours'
                     )
                     
-                    # 提取各项指标
+                    # Extract individual metrics
                     collision_rate = trimesh_metrics['collision_rate']
                     oob_rate = trimesh_metrics['out_of_bounds_rate']
                     total_penetration_depth = trimesh_metrics.get('total_penetration_depth', 0.0)
                     total_oob_volume = trimesh_metrics.get('total_oob_volume', 0.0)
                     
-                    # ===== 碰撞率奖励（基于SFT基线45%调整） =====
-                    # 阈值设计：
-                    # - 碰撞率 ≤ 20%: +1.0 到 +0.5（优秀）
-                    # - 碰撞率 20%-45%: +0.5 到 0.0（SFT基线为零点）
-                    # - 碰撞率 > 45%: 0.0 到 -1.0（比SFT差）
+                    # ===== Collision rate reward (adjusted based on SFT baseline 45%) =====
+                    # Threshold design:
+                    # - Collision rate ≤ 20%: +1.0 to +0.5 (excellent)
+                    # - Collision rate 20%-45%: +0.5 to 0.0 (SFT baseline as zero point)
+                    # - Collision rate > 45%: 0.0 to -1.0 (worse than SFT)
                     if collision_rate <= 20:
-                        # 优秀区间：0% -> +1.0, 20% -> +0.5
+                        # Excellent range: 0% -> +1.0, 20% -> +0.5
                         collision_reward = 1.0 - 0.5 * (collision_rate / 20.0)
                     elif collision_rate <= 45:
-                        # 良好区间（SFT基线为零点）：20% -> +0.5, 45% -> 0.0
+                        # Good range (SFT baseline as zero point): 20% -> +0.5, 45% -> 0.0
                         collision_reward = 0.5 - 0.5 * (collision_rate - 20) / 25.0
                     else:
-                        # 差于SFT：45% -> 0.0, 100% -> -1.0
+                        # Worse than SFT: 45% -> 0.0, 100% -> -1.0
                         collision_reward = -1.0 * (collision_rate - 45) / 55.0
                     
-                    # ===== 出界率奖励（基于SFT基线30%调整） =====
-                    # 阈值设计：
-                    # - 出界率 ≤ 10%: +1.0 到 +0.5（优秀）
-                    # - 出界率 10%-30%: +0.5 到 0.0（SFT基线为零点）
-                    # - 出界率 > 30%: 0.0 到 -1.0（比SFT差）
+                    # ===== OOB rate reward (adjusted based on SFT baseline 30%) =====
+                    # Threshold design:
+                    # - OOB rate ≤ 10%: +1.0 to +0.5 (excellent)
+                    # - OOB rate 10%-30%: +0.5 to 0.0 (SFT baseline as zero point)
+                    # - OOB rate > 30%: 0.0 to -1.0 (worse than SFT)
                     if oob_rate <= 10:
-                        # 优秀区间：0% -> +1.0, 10% -> +0.5
+                        # Excellent range: 0% -> +1.0, 10% -> +0.5
                         oob_reward = 1.0 - 0.5 * (oob_rate / 10.0)
                     elif oob_rate <= 30:
-                        # 良好区间（SFT基线为零点）：10% -> +0.5, 30% -> 0.0
+                        # Good range (SFT baseline as zero point): 10% -> +0.5, 30% -> 0.0
                         oob_reward = 0.5 - 0.5 * (oob_rate - 10) / 20.0
                     else:
-                        # 差于SFT：30% -> 0.0, 100% -> -1.0
+                        # Worse than SFT: 30% -> 0.0, 100% -> -1.0
                         oob_reward = -1.0 * (oob_rate - 30) / 70.0
                     
-                    # ===== 穿透深度体积奖励（归一化） =====
-                    # 阈值设计（考虑累计值，多个碰撞对的总穿透深度）：
+                    # ===== Penetration depth volume reward (normalized) =====
+                    # Threshold design (considering cumulative values, total penetration depth of multiple collision pairs):
                     # 0m=+1.0, 0.1m=+0.5, 0.3m=0.0, 0.6m=-0.5, 1.0m=-1.0
-                    # 场景参考：5个碰撞对各2cm=0.1m，各6cm=0.3m
+                    # Scene reference: 5 collision pairs each 2cm=0.1m, each 6cm=0.3m
                     if total_penetration_depth == 0:
                         penetration_reward = 1.0
-                    elif total_penetration_depth <= 0.1:  # 10cm以内（轻微碰撞）
-                        # 线性从1.0降到0.5
+                    elif total_penetration_depth <= 0.1:  # Within 10cm (minor collision)
+                        # Linear from 1.0 down to 0.5
                         penetration_reward = 1.0 - 0.5 * (total_penetration_depth / 0.1)
-                    elif total_penetration_depth <= 0.3:  # 10cm到30cm（中等碰撞）
-                        # 线性从0.5降到0.0
+                    elif total_penetration_depth <= 0.3:  # 10cm to 30cm (moderate collision)
+                        # Linear from 0.5 down to 0.0
                         penetration_reward = 0.5 - 0.5 * (total_penetration_depth - 0.1) / 0.2
-                    elif total_penetration_depth <= 0.6:  # 30cm到60cm（较严重碰撞）
-                        # 线性从0.0降到-0.5
+                    elif total_penetration_depth <= 0.6:  # 30cm to 60cm (fairly severe collision)
+                        # Linear from 0.0 down to -0.5
                         penetration_reward = -0.5 * (total_penetration_depth - 0.3) / 0.3
-                    elif total_penetration_depth <= 1.0:  # 60cm到1m（严重碰撞）
-                        # 线性从-0.5降到-1.0
+                    elif total_penetration_depth <= 1.0:  # 60cm to 1m (severe collision)
+                        # Linear from -0.5 down to -1.0
                         penetration_reward = -0.5 - 0.5 * (total_penetration_depth - 0.6) / 0.4
-                    else:  # 超过1m
+                    else:  # Over 1m
                         penetration_reward = -1.0
                     
-                    # ===== 出界体积奖励（归一化） =====
-                    # 阈值设计（考虑累计值，多个物体的总出界体积）：
+                    # ===== OOB volume reward (normalized) =====
+                    # Threshold design (considering cumulative values, total OOB volume of multiple objects):
                     # 0m³=+1.0, 0.2m³=+0.5, 0.5m³=0.0, 1.0m³=-0.5, 2.0m³=-1.0
-                    # 场景参考：一把椅子体积约0.1m³，一个沙发约0.5m³
+                    # Scene reference: a chair volume ≈ 0.1m³, a sofa ≈ 0.5m³
                     if total_oob_volume == 0:
                         oob_volume_reward = 1.0
-                    elif total_oob_volume <= 0.2:  # 0.2立方米以内（轻微出界）
-                        # 线性从1.0降到0.5
+                    elif total_oob_volume <= 0.2:  # Within 0.2 cubic meters (minor OOB)
+                        # Linear from 1.0 down to 0.5
                         oob_volume_reward = 1.0 - 0.5 * (total_oob_volume / 0.2)
-                    elif total_oob_volume <= 0.5:  # 0.2到0.5立方米（中等出界）
-                        # 线性从0.5降到0.0
+                    elif total_oob_volume <= 0.5:  # 0.2 to 0.5 cubic meters (moderate OOB)
+                        # Linear from 0.5 down to 0.0
                         oob_volume_reward = 0.5 - 0.5 * (total_oob_volume - 0.2) / 0.3
-                    elif total_oob_volume <= 1.0:  # 0.5到1立方米（较严重出界）
-                        # 线性从0.0降到-0.5
+                    elif total_oob_volume <= 1.0:  # 0.5 to 1 cubic meter (fairly severe OOB)
+                        # Linear from 0.0 down to -0.5
                         oob_volume_reward = -0.5 * (total_oob_volume - 0.5) / 0.5
-                    elif total_oob_volume <= 2.0:  # 1到2立方米（严重出界）
-                        # 线性从-0.5降到-1.0
+                    elif total_oob_volume <= 2.0:  # 1 to 2 cubic meters (severe OOB)
+                        # Linear from -0.5 down to -1.0
                         oob_volume_reward = -0.5 - 0.5 * (total_oob_volume - 1.0) / 1.0
-                    else:  # 超过2立方米
+                    else:  # Over 2 cubic meters
                         oob_volume_reward = -1.0
                     
                     rewards["collision_rate"] = collision_reward
@@ -4119,12 +4119,12 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     rewards["penetration_depth"] = penetration_reward
                     rewards["oob_volume"] = oob_volume_reward
                     
-                    # 保存trimesh物理评估结果
+                    # Save trimesh physics evaluation results
                     trimesh_metrics_path = instance["output_dir"] / f"turn_{turn:03d}_trimesh_metrics.json"
                     with open(trimesh_metrics_path, 'w', encoding='utf-8') as f:
                         json.dump(trimesh_metrics, f, indent=2)
                     
-                    # 存储trimesh_metrics供后续反馈生成使用
+                    # Store trimesh_metrics for subsequent feedback generation
                     instance["_trimesh_metrics_for_feedback"] = trimesh_metrics
                     
                 except Exception as e:
@@ -4143,7 +4143,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             rewards["oob_volume"] = 0.0
             instance["_trimesh_metrics_for_feedback"] = None
         
-        # 4.5. 计算支撑奖励（仅在最后一轮且trimesh模式下计算）
+        # 4.5. Calculate support reward (only in final turn and trimesh mode)
         if is_final_turn and self.physics_mode == "trimesh":
             try:
                 support_reward = await self._calculate_support_reward(current_scene)
@@ -4156,54 +4156,54 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         else:
             rewards["support"] = 0.0
         
-        # 5. 房间形状奖励已合并到格式奖励中（第一轮的format reward包含了形状奖励）
+        # 5. Room shape reward merged into format reward (turn 1 format reward includes shape reward)
         rewards["room_shape"] = 0.0
         
-        # 房间面积奖励已禁用
+        # Room area reward disabled
         rewards["room_area"] = 0.0
         
-        # 6. 计算工具执行成功奖励（仅第二轮及以后）
+        # 6. Calculate tool execution success reward (only from turn 2 onward)
         if turn > 1:
             if tool_execution_success is True:
                 rewards["tool_execution"] = 1.0
             elif tool_execution_success is False:
                 rewards["tool_execution"] = -1.0
             else:
-                # 如果没有提供状态，默认为成功
+                # If status not provided, default to success
                 rewards["tool_execution"] = 1.0
         else:
-            # 第一轮没有工具执行
+            # Turn 1 has no tool execution
             rewards["tool_execution"] = 0.0
         
-        # 8. VLM Judge 评分
-        # 初始化所有VLM评分为0
+        # 8. VLM Judge scoring
+        # Initialize all VLM scores to 0
         rewards["vlm_problem_identification"] = 0.0
         rewards["vlm_action_reasonableness"] = 0.0
-        rewards["vlm_scene_improvement"] = 0.0  # 中间轮次的场景改进度评估
-        rewards["vlm_key_objects"] = 0.0  # 物体层：关键物体匹配度
-        rewards["vlm_size_proportion"] = 0.0  # 物体层：尺寸比例合理性
+        rewards["vlm_scene_improvement"] = 0.0  # Intermediate turn scene improvement evaluation
+        rewards["vlm_key_objects"] = 0.0  # Object layer: key objects match
+        rewards["vlm_size_proportion"] = 0.0  # Object layer: size proportion reasonableness
         rewards["vlm_rationality"] = 0.0
-        rewards["vlm_aesthetics"] = 0.0  # 已删除，保持为0
+        rewards["vlm_aesthetics"] = 0.0  # Removed, kept at 0
         rewards["vlm_requirement_match"] = 0.0
-        rewards["vlm_scene_graph"] = 0.0  # 场景图约束评估
+        rewards["vlm_scene_graph"] = 0.0  # Scene graph constraint evaluation
         
-        # 熔断标志：物体层不合格时，场景层直接设为-1
+        # Fuse flag: when object layer fails, scene layer is directly set to -1
         object_level_fused = False
         
-        # VLM Judge评估
+        # VLM Judge evaluation
         if turn > 1 and self.vlm_judge_enabled and vlm_image_path and Path(vlm_image_path).exists():
             user_requirement = instance.get("user_requirement", "")
             
             if is_final_turn:
-                # ========== 最后一轮：分层评估 ==========
+                # ========== Final turn: layered evaluation ==========
                 self.logger.info("Final turn: Layered evaluation (Object Level -> Scene Level)")
                 self.logger.info(f"  Image: {vlm_image_path}")
                 self.logger.info(f"  Scene: edited scene with {len(vlm_scene.get('groups', []))} groups")
                 
-                # ----- 物体层评估 (0.3) -----
+                # ----- Object layer evaluation (0.3) -----
                 self.logger.info("=== Object Level Evaluation ===")
                 
-                # 1. 关键物体匹配度评估
+                # 1. Key objects match evaluation
                 try:
                     current_scene_summary = self._extract_objects_summary(current_scene)
                     room_type = current_scene.get('room_type', '')
@@ -4220,7 +4220,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     self.logger.warning(f"Key objects evaluation failed: {e}")
                     rewards["vlm_key_objects"] = 0.0
                 
-                # 2. 尺寸比例合理性评估
+                # 2. Size proportion reasonableness evaluation
                 try:
                     size_proportion_result = await self._vlm_evaluate_object_size_proportion(
                         image_path=vlm_image_path,
@@ -4233,16 +4233,16 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     self.logger.warning(f"Size proportion evaluation failed: {e}")
                     rewards["vlm_size_proportion"] = 0.0
                 
-                # 3. 物体数量评估（已在前面计算）
-                # rewards["object_count"] 已计算
+                # 3. Object count evaluation (already calculated above)
+                # rewards["object_count"] already calculated
                 
-                # 如果物体数量过少（<4），强制设置关键物体得分为-1，确保物体层熔断
+                # If object count is too low (<4), force key objects score to -1 to ensure object layer fuses
                 if should_override_total_reward:
                     rewards["vlm_key_objects"] = -1.0
                     self.logger.warning("Object count < 4, forcing vlm_key_objects to -1.0")
                 
-                # ----- 物体层熔断判断 -----
-                # 物体层加权得分 = key_objects * 0.20 + size_proportion * 0.10 + object_count * 0.0
+                # ----- Object layer fuse judgment -----
+                # Object layer weighted score = key_objects * 0.20 + size_proportion * 0.10 + object_count * 0.0
                 object_level_score = (
                     rewards["vlm_key_objects"] * weights.get("vlm_key_objects", 0.20) +
                     rewards["vlm_size_proportion"] * weights.get("vlm_size_proportion", 0.10) +
@@ -4251,13 +4251,13 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 self.logger.info(f"Object level weighted score: {object_level_score:.4f}")
                 
                 if object_level_score < 0:
-                    # 物体层不合格，熔断！场景层直接设为-1
+                    # Object layer failed, fuse! Scene layer directly set to -1
                     object_level_fused = True
                     self.logger.warning(f"Object level FUSED: score={object_level_score:.4f} < 0, scene level will be set to -1")
                     rewards["vlm_rationality"] = -1.0
                     rewards["vlm_requirement_match"] = -1.0
                     rewards["vlm_scene_graph"] = -1.0
-                    # 物理指标也设为-1
+                    # Physics metrics also set to -1
                     if self.physics_mode == "trimesh":
                         rewards["collision_rate"] = -1.0
                         rewards["oob_rate"] = -1.0
@@ -4267,10 +4267,10 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                     elif self.physics_mode == "voxel":
                         rewards["physics"] = -1.0
                 else:
-                    # ----- 场景层评估 (0.6) -----
+                    # ----- Scene layer evaluation (0.6) -----
                     self.logger.info("=== Scene Level Evaluation ===")
                     
-                    # 场景层VLM评估（已合并为一次调用）
+                    # Scene layer VLM evaluation (merged into a single call)
                     try:
                         vlm_scores = await self._judge_final_turn(
                             image_path=vlm_image_path,
@@ -4281,7 +4281,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         rewards["vlm_requirement_match"] = float(vlm_scores.get("requirement_match", 0))
                         rewards["vlm_scene_graph"] = float(vlm_scores.get("scene_graph", 0))
                         
-                        # 保存VLM评分结果
+                        # Save VLM scoring results
                         vlm_scores_path = instance["output_dir"] / f"turn_{turn:03d}_vlm_final_scores.json"
                         vlm_scores["key_objects_score"] = rewards["vlm_key_objects"]
                         vlm_scores["size_proportion_score"] = rewards["vlm_size_proportion"]
@@ -4294,26 +4294,26 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                         if self.verbose:
                             print(f"Warning: VLM judge final evaluation failed: {e}")
             else:
-                # ========== 中间轮次：场景改进度 + 物体相关性评估 ==========
+                # ========== Intermediate turns: scene improvement + object relevance evaluation ==========
                 self.logger.info("Intermediate turn: calling VLM judge for scene improvement comparison")
                 self.logger.info(f"  Previous image: {vlm_prev_image_path}")
                 self.logger.info(f"  Current image: {vlm_image_path}")
                 
-                # 检查两张图像是否都存在
+                # Check if both images exist
                 if vlm_prev_image_path and Path(vlm_prev_image_path).exists():
                     try:
-                        # 提取上一轮和当前轮的物体摘要供VLM参考
+                        # Extract previous and current turn object summaries for VLM reference
                         prev_scene_summary = ""
                         current_scene_summary = ""
                         
-                        # scene_before_edit 是编辑前的场景（上一轮状态）
+                        # scene_before_edit is the scene before editing (previous turn state)
                         if scene_before_edit:
                             try:
                                 prev_scene_summary = self._extract_objects_summary(scene_before_edit)
                             except Exception as e:
                                 self.logger.warning(f"Failed to extract prev scene summary: {e}")
                         
-                        # current_scene 是编辑后的场景（当前轮状态）
+                        # current_scene is the scene after editing (current turn state)
                         if current_scene:
                             try:
                                 current_scene_summary = self._extract_objects_summary(current_scene)
@@ -4321,26 +4321,26 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                                 self.logger.warning(f"Failed to extract current scene summary: {e}")
                         
                         vlm_scores = await self._judge_intermediate_turn(
-                            prev_image_path=vlm_prev_image_path,  # 上一轮的图像
-                            current_image_path=vlm_image_path,  # 本轮的图像
+                            prev_image_path=vlm_prev_image_path,  # Previous turn's image
+                            current_image_path=vlm_image_path,  # Current turn's image
                             user_requirement=user_requirement,
-                            prev_scene_summary=prev_scene_summary,  # 上一轮物体摘要
-                            current_scene_summary=current_scene_summary  # 当前轮物体摘要
+                            prev_scene_summary=prev_scene_summary,  # Previous turn object summary
+                            current_scene_summary=current_scene_summary  # Current turn object summary
                         )
                         rewards["vlm_scene_improvement"] = float(vlm_scores.get("scene_improvement", 0))
                         
-                        # ===== 物体相关性评估（根据工具调用类型选择策略） =====
-                        # 提取本轮工具调用
+                        # ===== Object relevance evaluation (select strategy based on tool call type) =====
+                        # Extract current turn's tool calls
                         current_tool_calls = self._extract_tool_calls_from_messages(messages)
                         
-                        # 检查是否有add_object或replace_object操作
+                        # Check if there are add_object or replace_object operations
                         has_add_or_replace = any(
                             tc.get("name") in ["add_object", "replace_object"]
                             for tc in current_tool_calls
                         )
                         
                         if has_add_or_replace:
-                            # 有add/replace操作：评估新增物体是否与场景需求相关
+                            # Has add/replace operations: evaluate whether new objects are relevant to scene requirements
                             self.logger.info("Intermediate turn: Has add/replace operations, evaluating new objects relevance")
                             try:
                                 room_type = current_scene.get('room_type', '')
@@ -4361,7 +4361,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                                 self.logger.warning(f"New objects relevance evaluation failed: {e}")
                                 rewards["vlm_key_objects"] = 0.0
                         else:
-                            # 无add/replace操作：评估当前场景是否包含关键物体
+                            # No add/replace operations: evaluate whether current scene contains key objects
                             self.logger.info("Intermediate turn: No add/replace operations, evaluating key objects presence")
                             try:
                                 room_type = current_scene.get('room_type', '')
@@ -4387,7 +4387,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                                 self.logger.warning(f"Key objects evaluation failed: {e}")
                                 rewards["vlm_key_objects"] = 0.0
                         
-                        # 保存VLM评分结果
+                        # Save VLM scoring results
                         vlm_scores_path = instance["output_dir"] / f"turn_{turn:03d}_vlm_intermediate_scores.json"
                         with open(vlm_scores_path, 'w', encoding='utf-8') as f:
                             json.dump(vlm_scores, f, indent=2)
@@ -4401,7 +4401,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         elif turn > 1 and self.vlm_judge_enabled:
             self.logger.warning(f"VLM judge skipped: vlm_image_path={vlm_image_path}, exists={Path(vlm_image_path).exists() if vlm_image_path else False}")
         
-        # 计算加权总奖励
+        # Calculate weighted total reward
         total_reward = (
             weights["physics"] * rewards["physics"] +
             weights["format"] * rewards["format"] +
@@ -4415,33 +4415,33 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             weights["tool_execution"] * rewards["tool_execution"] +
             weights["vlm_problem_identification"] * rewards["vlm_problem_identification"] +
             weights["vlm_action_reasonableness"] * rewards["vlm_action_reasonableness"] +
-            weights.get("vlm_scene_improvement", 0.0) * rewards["vlm_scene_improvement"] +  # 场景改进度
-            weights.get("vlm_key_objects", 0.0) * rewards["vlm_key_objects"] +  # 物体层：关键物体
-            weights.get("vlm_size_proportion", 0.0) * rewards["vlm_size_proportion"] +  # 物体层：尺寸比例
+            weights.get("vlm_scene_improvement", 0.0) * rewards["vlm_scene_improvement"] +  # Scene improvement
+            weights.get("vlm_key_objects", 0.0) * rewards["vlm_key_objects"] +  # Object layer: key objects
+            weights.get("vlm_size_proportion", 0.0) * rewards["vlm_size_proportion"] +  # Object layer: size proportion
             weights["vlm_rationality"] * rewards["vlm_rationality"] +
-            weights["vlm_aesthetics"] * rewards["vlm_aesthetics"] +  # 已废弃，保持为0
+            weights["vlm_aesthetics"] * rewards["vlm_aesthetics"] +  # Deprecated, kept at 0
             weights["vlm_requirement_match"] * rewards["vlm_requirement_match"] +
-            weights["vlm_scene_graph"] * rewards["vlm_scene_graph"]  # 场景图约束评估
+            weights["vlm_scene_graph"] * rewards["vlm_scene_graph"]  # Scene graph constraint evaluation
         )
         
-        # 特殊规则：如果最后一轮物体数量<4，直接覆盖总奖励为-1
+        # Special rule: if object count < 4 in final turn, override total reward to -1
         if should_override_total_reward:
             self.logger.warning(f"Overriding total reward from {total_reward:.4f} to -1.0 due to object count < 4")
             print(f"WARNING: Object count < 4 in final turn, overriding total reward to -1.0", file=sys.stderr, flush=True)
             total_reward = -1.0
         
-        # 调试输出
+        # Debug output
         print(f"DEBUG [Interaction Turn {turn}] (physics_mode={self.physics_mode}, is_final={is_final_turn}, fused={object_level_fused}): Reward breakdown:",   
             file=sys.stderr, flush=True)
         
-        # 显示非零权重的评估指标
+        # Show non-zero weight evaluation metrics
         if turn == 1:
             print(f"  Format: {rewards['format']:.4f} (weight: {weights['format']})",
                 file=sys.stderr, flush=True)
             print(f"  Room Area: {rewards['room_area']:.4f} (weight: {weights['room_area']})",
                 file=sys.stderr, flush=True)
         elif is_final_turn:
-            # 最后一轮：分层显示
+            # Final turn: layered display
             print(f"  === Format Layer (0.1) ===", file=sys.stderr, flush=True)
             print(f"  Format: {rewards['format']:.4f} (weight: {weights['format']})",
                 file=sys.stderr, flush=True)
@@ -4481,7 +4481,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             print(f"  VLM Scene Graph: {rewards['vlm_scene_graph']:.4f} (weight: {weights['vlm_scene_graph']})",
                 file=sys.stderr, flush=True)
         else:
-            # 中间轮次：显示格式、碰撞率、出界率、体积奖励和场景改进度评分
+            # Intermediate turns: show format, collision rate, OOB rate, volume rewards and scene improvement scores
             print(f"  Format: {rewards['format']:.4f} (weight: {weights['format']})",
                 file=sys.stderr, flush=True)
             if self.physics_mode == "trimesh":
@@ -4501,7 +4501,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         print(f"  Total: {total_reward:.4f}",
             file=sys.stderr, flush=True)
         
-        # 存储详细奖励组件到实例状态  
+        # Store detailed reward components to instance state  
         reward_component = {
             f"turn_{turn}_format_reward": rewards["format"],
             f"turn_{turn}_object_count_reward": rewards["object_count"],
@@ -4522,27 +4522,27 @@ Reply with only one word: floor, surface, ceiling, or wall"""
                 reward_component[f"turn_{turn}_support_reward"] = rewards["support"]
             reward_component[f"turn_{turn}_tool_execution_reward"] = rewards["tool_execution"]
             
-            # VLM judge 奖励组件
+            # VLM judge reward components
             
             if is_final_turn:
-                reward_component[f"turn_{turn}_vlm_key_objects"] = rewards["vlm_key_objects"]  # Object Layer: 关键物体
-                reward_component[f"turn_{turn}_vlm_size_proportion"] = rewards["vlm_size_proportion"]  # Object Layer: 物体尺寸
-                reward_component[f"turn_{turn}_vlm_rationality"] = rewards["vlm_rationality"]  # Scene Layer: 合理性
-                reward_component[f"turn_{turn}_vlm_requirement_match"] = rewards["vlm_requirement_match"]  # Scene Layer: 需求匹配
-                reward_component[f"turn_{turn}_vlm_scene_graph"] = rewards["vlm_scene_graph"]  # Scene Layer: 场景图约束
+                reward_component[f"turn_{turn}_vlm_key_objects"] = rewards["vlm_key_objects"]  # Object Layer: key objects
+                reward_component[f"turn_{turn}_vlm_size_proportion"] = rewards["vlm_size_proportion"]  # Object Layer: object size
+                reward_component[f"turn_{turn}_vlm_rationality"] = rewards["vlm_rationality"]  # Scene Layer: rationality
+                reward_component[f"turn_{turn}_vlm_requirement_match"] = rewards["vlm_requirement_match"]  # Scene Layer: requirement match
+                reward_component[f"turn_{turn}_vlm_scene_graph"] = rewards["vlm_scene_graph"]  # Scene Layer: scene graph constraint
             else:
-                reward_component[f"turn_{turn}_vlm_scene_improvement"] = rewards["vlm_scene_improvement"]  # 场景改进度评估
-                reward_component[f"turn_{turn}_vlm_key_objects"] = rewards["vlm_key_objects"]  # 关键物体评估
+                reward_component[f"turn_{turn}_vlm_scene_improvement"] = rewards["vlm_scene_improvement"]  # Scene improvement evaluation
+                reward_component[f"turn_{turn}_vlm_key_objects"] = rewards["vlm_key_objects"]  # Key objects evaluation
         
         instance.setdefault("reward_components", []).append(reward_component)
         
-        # ===== 生成反馈用于下一轮 =====
-        # 只在中间轮次生成反馈（最后一轮不需要反馈）
-        # 可通过配置开关控制是否启用反馈注入
+        # ===== Generate feedback for next turn =====
+        # Only generate feedback in intermediate turns (final turn doesn't need feedback)
+        # Can be controlled by config switch to enable/disable feedback injection
         if turn > 1 and not is_final_turn and self.feedback_injection_enabled:
             feedback_parts = []
             
-            # 1. 物理反馈（来自trimesh）- 受 physics_feedback_enabled 控制
+            # 1. Physics feedback (from trimesh) - controlled by physics_feedback_enabled
             if self.physics_feedback_enabled:
                 trimesh_metrics_for_feedback = instance.get("_trimesh_metrics_for_feedback")
                 if trimesh_metrics_for_feedback:
@@ -4553,7 +4553,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             else:
                 self.logger.info("Physics feedback disabled by config")
             
-            # 2. VLM布局反馈（只在有图像时生成）- 受 layout_feedback_enabled 控制
+            # 2. VLM layout feedback (only generated when image is available) - controlled by layout_feedback_enabled
             if self.layout_feedback_enabled and vlm_image_path and Path(vlm_image_path).exists():
                 user_requirement = instance.get("user_requirement", "")
                 try:
@@ -4569,7 +4569,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             elif not self.layout_feedback_enabled:
                 self.logger.info("Layout feedback disabled by config")
             
-            # 组合反馈
+            # Combine feedback
             if feedback_parts:
                 combined_feedback = " ".join(feedback_parts)
                 instance["last_feedback"] = combined_feedback
@@ -4588,7 +4588,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         instance_id: str,
         **kwargs
     ) -> None:
-        """结束交互实例，清理资源，并返回奖励信息"""
+        """End interaction instance, clean up resources, and return reward information"""
         
         self.logger.info("="*80)
         self.logger.info(f"finalize_interaction called for instance {instance_id}")
@@ -4601,7 +4601,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         
         instance = self._instance_dict[instance_id]
         
-        # 保存交互摘要
+        # Save interaction summary
         summary = {
             "instance_id": instance_id,
             "total_turns": instance["turn_count"],
@@ -4629,7 +4629,7 @@ Reply with only one word: floor, surface, ceiling, or wall"""
             print(f"  Summary saved to: {summary_path}")
             print(f"{'='*60}")
         
-        # 合并所有 turn 的奖励组件到一个字典
+        # Merge all turn reward components into one dictionary
         reward_scores = {}
         for components in instance.get("reward_components", []):
             reward_scores.update(components)
@@ -4638,8 +4638,8 @@ Reply with only one word: floor, surface, ceiling, or wall"""
         self.logger.info(f"Reward scores: {json.dumps(reward_scores, indent=2)}")
         self.logger.info(f"Final scene has {len(final_scene.get('objects', []))} objects")
         
-        # 清理实例
-        # 删除实例输出目录及其内容
+        # Clean up instance
+        # Delete instance output directory and its contents
 
         del self._instance_dict[instance_id]
         

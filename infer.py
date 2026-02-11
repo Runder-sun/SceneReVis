@@ -13,7 +13,7 @@ import copy
 import logging
 import random
 
-# 设置 swift 和 vllm 的日志级别为 WARNING，减少输出
+# Set swift and vllm log level to WARNING to reduce output
 logging.getLogger("swift").setLevel(logging.WARNING)
 logging.getLogger("vllm").setLevel(logging.WARNING)
 logging.getLogger("transformers").setLevel(logging.WARNING)
@@ -21,7 +21,7 @@ logging.getLogger("transformers").setLevel(logging.WARNING)
 # Add eval directory to path for physics optimization
 sys.path.append(os.path.join(os.path.dirname(__file__), 'eval'))
 
-# Import helper functions for physics optimization (不导入 SceneOptimizer 以避免循环导入)
+# Import helper functions for physics optimization (not importing SceneOptimizer to avoid circular imports)
 try:
     from eval.myeval import parse_scene_data, create_room_mesh, create_floor_polygon, get_object_field
     PHYSICS_OPTIMIZATION_AVAILABLE = True
@@ -35,13 +35,13 @@ from azure.identity import AzureCliCredential, ManagedIdentityCredential, Chaine
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
-# Azure OpenAI配置
+# Azure OpenAI configuration
 AZURE_OPENAI_ENDPOINT = "YOUR_AZURE_OPENAI_ENDPOINT"
 AZURE_OPENAI_DEPLOYMENT_NAME = "YOUR_DEPLOYMENT_NAME"
 AZURE_OPENAI_API_VERSION = "2025-03-01-preview"
 AZURE_OPENAI_SCOPE = "YOUR_AZURE_OPENAI_SCOPE"
 
-# 设置必要的环境变量用于资产检索
+# Set necessary environment variables for asset retrieval
 os.environ['PTH_3DFUTURE_ASSETS'] = '/path/to/datasets/3d-front/3D-FUTURE-model'
 os.environ['PTH_INVALID_ROOMS'] = './metadata/invalid_threed_front_rooms.txt'
 os.environ['PTH_ASSETS_METADATA'] = './metadata/model_info_3dfuture_assets.json'
@@ -50,18 +50,18 @@ os.environ['PTH_ASSETS_METADATA_SIMPLE_DESCS'] = './metadata/model_info_3dfuture
 os.environ['PTH_ASSETS_METADATA_PROMPTS'] = './metadata/model_info_3dfuture_assets_prompts.json'
 os.environ['PTH_ASSETS_EMBED'] = './metadata/model_info_3dfuture_assets_embeds.pickle'
 
-# 在可能的情况下，修补 modelscope 的动态导入函数，以避免在解释器退出时触发额外导入和异常
+# When possible, patch modelscope's dynamic import functions to avoid triggering extra imports and exceptions on interpreter exit
 try:
     import modelscope
-    # 将 try_import_from_hf 设置为安全的空实现（不抛异常）
+    # Set try_import_from_hf to a safe no-op implementation (no exceptions thrown)
     if hasattr(modelscope, 'try_import_from_hf'):
         modelscope.try_import_from_hf = lambda *a, **kw: None
-    # 兼容某些版本的内部钩子名
+    # Compatible with some versions' internal hook names
     if hasattr(modelscope, '_extra_import_func'):
         modelscope._extra_import_func = lambda name: None
     print('Patched modelscope dynamic import hooks to be safe for atexit')
 except Exception:
-    # 如果 modelscope 未安装或修补失败，不要中断运行
+    # If modelscope is not installed or patching fails, don't interrupt execution
     pass
 
 from swift.llm import (
@@ -71,15 +71,15 @@ from swift.tuners import Swift
 from swift.plugin import InferStats
 from typing import List
 
-# 添加退出时的清理函数
+# Add cleanup function for exit
 def cleanup_on_exit():
-    """程序退出时的清理函数"""
+    """Cleanup function called on program exit"""
     try:
-        # 清理可能导致冲突的模块
+        # Clean up modules that may cause conflicts
         import sys
         conflicting_modules = []
         
-        # 收集需要清理的模块
+        # Collect modules that need to be cleaned up
         for module_name in list(sys.modules.keys()):
             if any(pattern in module_name.lower() for pattern in [
                 'addon_utils', 'bpy.ops', 'blender', 
@@ -87,7 +87,7 @@ def cleanup_on_exit():
             ]):
                 conflicting_modules.append(module_name)
         
-        # 安全地移除这些模块
+        # Safely remove these modules
         for module_name in conflicting_modules:
             try:
                 if module_name in sys.modules:
@@ -95,7 +95,7 @@ def cleanup_on_exit():
             except:
                 pass
                 
-        # 尝试清理bpy场景数据
+        # Try to clean up bpy scene data
         if 'bpy' in sys.modules:
             try:
                 import bpy
@@ -105,7 +105,7 @@ def cleanup_on_exit():
     except:
         pass
 
-# 注册退出清理函数，使用更安全的方式
+# Register exit cleanup function in a safer way
 import weakref
 def safe_cleanup():
     try:
@@ -116,12 +116,12 @@ def safe_cleanup():
 atexit.register(safe_cleanup)
 
 
-# ============== 物理优化：规则式场景优化器 ==============
+# ============== Physics Optimization: Rule-based Scene Optimizer ==============
 
 class RuleBasedSceneOptimizer:
     """
-    规则式场景优化器，用于解决物体碰撞和出界问题。
-    不依赖 LLM，通过规则进行位置调整和删除冲突物体。
+    Rule-based scene optimizer for resolving object collision and out-of-bounds issues.
+    Does not rely on LLM; adjusts positions and removes conflicting objects through rules.
     """
     
     def __init__(self, scene_file, models_path, format_type='ours', client=None):
@@ -155,21 +155,21 @@ class RuleBasedSceneOptimizer:
         self.mesh_cache = {} 
         self.indices_to_delete = set()
         
-        # 记录被删除的物品类别（用于反馈给模型）
-        self.deleted_objects_desc = []  # 存储被删除物品的描述
+        # Track deleted object categories (for feedback to the model)
+        self.deleted_objects_desc = []  # Store descriptions of deleted objects
     
     def get_object_category(self, idx):
-        """获取物体的类别描述（用于反馈）"""
+        """Get object category description (for feedback)"""
         obj = self.objects_data[idx]
         desc = get_object_field(obj, 'desc', self.format_type)
         if not desc:
             return 'unknown object'
-        # 提取简短类别名（通常是描述的最后一两个单词或主要名词）
-        # 简单处理：返回描述的前几个单词
+        # Extract short category name (usually the last one or two words or main noun of the description)
+        # Simple approach: return the first few words of the description
         words = desc.split()
         if len(words) <= 3:
             return desc
-        # 尝试提取核心名词（通常在末尾）
+        # Try to extract core noun (usually at the end)
         return ' '.join(words[-3:]).strip()
 
     def get_object_volume(self, idx):
@@ -186,7 +186,7 @@ class RuleBasedSceneOptimizer:
         jid = get_object_field(obj, 'jid', self.format_type)
         size = get_object_field(obj, 'size', self.format_type)
         pos = obj.get('pos', [0, 0, 0])
-        rot = obj.get('rot', [0, 0, 0, 1])  # 默认四元数 [x, y, z, w]
+        rot = obj.get('rot', [0, 0, 0, 1])  # Default quaternion [x, y, z, w]
         
         # Ensure size is valid
         try:
@@ -202,20 +202,20 @@ class RuleBasedSceneOptimizer:
         except (TypeError, ValueError):
             pos = [0, 0, 0]
         
-        # 处理旋转 - 支持四元数和欧拉角两种格式
+        # Handle rotation - supports both quaternion and Euler angle formats
         try:
             if rot is None:
-                rotation = R.from_quat([0, 0, 0, 1])  # 单位四元数
+                rotation = R.from_quat([0, 0, 0, 1])  # Identity quaternion
             elif isinstance(rot, (int, float)):
-                # 单个值：Y轴旋转（弧度）
+                # Single value: Y-axis rotation (radians)
                 rotation = R.from_euler('y', float(rot), degrees=False)
             elif isinstance(rot, list):
                 if len(rot) == 4:
-                    # 四元数格式 [x, y, z, w]
+                    # Quaternion format [x, y, z, w]
                     rot = [float(r) for r in rot]
                     rotation = R.from_quat(rot)
                 elif len(rot) == 3:
-                    # 欧拉角格式 [rx, ry, rz]（弧度）
+                    # Euler angle format [rx, ry, rz] (radians)
                     rot = [float(r) for r in rot]
                     rotation = R.from_euler('xyz', rot, degrees=False)
                 else:
@@ -225,10 +225,10 @@ class RuleBasedSceneOptimizer:
         except Exception:
             rotation = R.from_quat([0, 0, 0, 1])
         
-        # 创建 box mesh（简化模型）
+        # Create box mesh (simplified model)
         box = trimesh.creation.box(extents=size)
         
-        # 将 box 移动到底部中心为原点（类似 optimize_scene.py 的处理）
+        # Move box so bottom center is at origin (similar to optimize_scene.py's approach)
         bounds = box.bounds
         bottom_center_pivot = np.array([
             (bounds[0, 0] + bounds[1, 0]) / 2,
@@ -239,12 +239,12 @@ class RuleBasedSceneOptimizer:
         center_transform[:3, 3] = -bottom_center_pivot
         box.apply_transform(center_transform)
         
-        # 构建变换矩阵
+        # Build transformation matrix
         transform_matrix = np.eye(4)
         transform_matrix[:3, :3] = rotation.as_matrix()
         transform_matrix[:3, 3] = pos
         
-        # 应用变换
+        # Apply transformation
         box.apply_transform(transform_matrix)
         
         return box
@@ -452,43 +452,43 @@ class RuleBasedSceneOptimizer:
         return self.objects_data
     
     def get_deleted_objects_feedback(self):
-        """获取被删除物品的反馈信息"""
+        """Get feedback information about deleted objects"""
         if not self.deleted_objects_desc:
             return ""
-        # 去重
+        # Deduplicate
         unique_deleted = list(set(self.deleted_objects_desc))
         return f"[Physics Optimization] The following objects were removed due to collision/out-of-bounds: {', '.join(unique_deleted)}. Consider adding them back in better positions."
 
 
 def apply_physics_optimization(scene_data: dict, models_path: str, max_steps: int = 5, azure_client=None) -> tuple:
     """
-    对场景应用物理优化，解决碰撞和出界问题。
+    Apply physics optimization to the scene, resolving collision and out-of-bounds issues.
     
     Args:
-        scene_data: 场景数据字典
-        models_path: 3D模型路径
-        max_steps: 最大优化步数
-        azure_client: Azure OpenAI client，用于 GPT 咨询（可选）
+        scene_data: Scene data dictionary
+        models_path: Path to 3D models
+        max_steps: Maximum number of optimization steps
+        azure_client: Azure OpenAI client for GPT consultation (optional)
         
     Returns:
-        tuple: (优化后的场景数据, 删除物品反馈字符串)
+        tuple: (optimized scene data, deleted objects feedback string)
     """
     if not PHYSICS_OPTIMIZATION_AVAILABLE:
         print("⚠ Physics optimization not available (missing dependencies)")
         return scene_data, ""
     
     try:
-        # 创建临时文件
+        # Create temporary file
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump(scene_data, f, indent=2, ensure_ascii=False)
             temp_path = f.name
         
-        # 确定格式类型
+        # Determine format type
         format_type = 'ours'
         if 'room_envelope' not in scene_data and 'bounds_bottom' in scene_data:
             format_type = 'respace'
         
-        # 如果没有提供 client，尝试创建一个
+        # If no client provided, try to create one
         if azure_client is None:
             try:
                 azure_client = setup_azure_client()
@@ -497,22 +497,22 @@ def apply_physics_optimization(scene_data: dict, models_path: str, max_steps: in
                 print(f"  Warning: Could not initialize Azure client: {e}")
                 print("  Will use fallback strategy (keep all objects when resolving conflicts)")
         
-        # 初始化优化器并运行（传递 client）
+        # Initialize optimizer and run (pass client)
         optimizer = RuleBasedSceneOptimizer(temp_path, models_path, format_type=format_type, client=azure_client)
         optimized_objects = optimizer.optimize(max_steps=max_steps)
         
-        # 获取删除物品的反馈
+        # Get feedback for deleted objects
         deleted_feedback = optimizer.get_deleted_objects_feedback()
         if deleted_feedback:
             print(f"  Deleted objects feedback: {deleted_feedback}")
         
-        # 更新场景数据
+        # Update scene data
         result = copy.deepcopy(scene_data)
         result['objects'] = optimized_objects
         if 'groups' in result:
             del result['groups']
         
-        # 清理临时文件
+        # Clean up temporary file
         os.unlink(temp_path)
         
         print(f"✓ Physics optimization completed: {len(optimized_objects)} objects remaining")
@@ -545,27 +545,27 @@ def setup_azure_client() -> AzureOpenAI:
 
 def generate_vlm_layout_feedback_azure(image_path: str, user_requirement: str, azure_client: AzureOpenAI = None) -> str:
     """
-    使用 Azure GPT-5.1 生成简短的VLM布局反馈（不包含物理碰撞/出界问题）
+    Use Azure GPT-5.1 to generate brief VLM layout feedback (excluding physics collision/out-of-bounds issues)
     
-    参数:
-        image_path: 渲染图路径
-        user_requirement: 用户需求
-        azure_client: Azure OpenAI 客户端实例（如果为None则创建新的）
+    Args:
+        image_path: Path to rendered image
+        user_requirement: User requirement
+        azure_client: Azure OpenAI client instance (creates a new one if None)
         
-    返回:
-        简短的布局反馈文本，如果没有问题或失败则返回空字符串
+    Returns:
+        Brief layout feedback text, or empty string if no issues or failure
     """
     import base64
     
     if azure_client is None:
         azure_client = setup_azure_client()
     
-    # 检查图像是否存在
+    # Check if image exists
     if not Path(image_path).exists():
         print(f"Warning: Image not found for VLM feedback: {image_path}")
         return ""
     
-    # 将图像转换为base64
+    # Convert image to base64
     try:
         with open(image_path, 'rb') as f:
             img_data = f.read()
@@ -619,7 +619,7 @@ Example outputs:
         
         result = response.choices[0].message.content.strip()
         
-        # 如果VLM返回"no issues"类似的内容，返回空字符串
+        # If VLM returns "no issues" or similar content, return empty string
         if any(phrase in result.lower() for phrase in ["no issue", "looks good", "well-designed", "properly placed", "no problems"]):
             return ""
         
@@ -631,38 +631,38 @@ Example outputs:
         return ""
 
 
-# 导入渲染和资产检索相关模块
+# Import rendering and asset retrieval related modules
 render_scene_with_bpy = None
 AssetRetrievalModule = None
 
 try:
     import sys
-    # 添加utils路径
+    # Add utils path
     utils_path = os.path.join(os.path.dirname(__file__), 'utils')
     if utils_path not in sys.path:
         sys.path.append(utils_path)
     
-    # 导入智能Blender包装器（改为使用外部 Blender 进程渲染以隔离 bpy）
+    # Import smart Blender wrapper (switched to external Blender process rendering to isolate bpy)
     from blender_wrapper import render_scene_blender_external as render_scene_with_bpy
     print("Successfully imported Blender external-process rendering wrapper")
-    # 不再在主进程修补 bpy.addon_utils；外部进程会在自己的 Python 环境中运行
+    # No longer patching bpy.addon_utils in main process; external process runs in its own Python environment
     
 except Exception as e:
     print(f"Warning: Could not import Blender rendering wrapper: {e}")
     
-    # Fallback渲染函数
+    # Fallback rendering function
     def render_scene_with_bpy(scene_data, output_dir):
-        """最简单的fallback渲染函数"""
+        """Simplest fallback rendering function"""
         print(f"Using simple fallback rendering for scene in {output_dir}")
         from pathlib import Path
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
         
-        # 创建简单的占位符文件
+        # Create simple placeholder files
         (output_path / 'top').mkdir(exist_ok=True)
         (output_path / 'diag').mkdir(exist_ok=True)
         
-        # 创建空图片文件作为占位符
+        # Create empty image files as placeholders
         for view in ['top', 'diag']:
             placeholder_file = output_path / view / 'frame.png'
             with open(placeholder_file, 'w') as f:
@@ -671,9 +671,9 @@ except Exception as e:
         return str(output_path)
 
 try:
-    # 使用 sample.py 中的高级资产检索模块
+    # Use advanced asset retrieval module from sample.py
     from utils.sample import AssetRetrievalModule
-    # 初始化参数与 sample.py 中的测试代码保持一致
+    # Initialization parameters match the test code in sample.py
     asset_retrieval_module = AssetRetrievalModule(
         lambd=0.7, 
         sigma=0.05, 
@@ -690,7 +690,7 @@ except Exception as e:
     print("  Will use placeholder asset IDs instead")
     asset_retrieval_module = None
 
-# 导入 Objaverse 检索模块
+# Import Objaverse retrieval module
 objaverse_retrieval_module = None
 try:
     from utils.objaverse_retriever import ObjaverseRetriever
@@ -699,7 +699,7 @@ except Exception as e:
     print(f"Warning: Could not import Objaverse retrieval module: {e}")
     ObjaverseRetriever = None
 
-# 导入 3D 可视化模块
+# Import 3D visualization module
 try:
     from utils.visualization_3d import render_with_visualization
     print("Successfully imported 3D visualization module")
@@ -707,7 +707,7 @@ except Exception as e:
     print(f"Warning: Could not import 3D visualization module: {e}")
     render_with_visualization = None
 
-# 导入场景编辑器
+# Import scene editor
 try:
     from utils.scene_editor import apply_tool_calls
     print("Successfully imported scene_editor module")
@@ -715,7 +715,7 @@ except Exception as e:
     print(f"Warning: Could not import scene_editor module: {e}")
     apply_tool_calls = None
 
-# 导入格式转换函数和物理评估
+# Import format conversion functions and physics evaluation
 try:
     from utils.RL_utils import convert_flat_to_grouped, convert_grouped_to_flat, TrimeshPhysicsMetrics, generate_physics_feedback
     print("Successfully imported format conversion functions and physics utils from RL_utils")
@@ -723,7 +723,7 @@ except Exception as e:
     print(f"Warning: Could not import format conversion functions: {e}")
 except Exception as e:
     print(f"Warning: Could not import format conversion functions: {e}")
-    # 如果导入失败，定义回退版本
+    # If import fails, define fallback versions
     def convert_flat_to_grouped(scene):
         if 'groups' in scene:
             return scene
@@ -770,7 +770,7 @@ except Exception as e:
 
 
 def read_initial_scene_json(json_file_path):
-    """读取JSON文件并返回格式化的字符串"""
+    """Read JSON file and return formatted string"""
     try:
         with open(json_file_path, 'r', encoding='utf-8') as f:
             scene_data = json.load(f)
@@ -780,7 +780,7 @@ def read_initial_scene_json(json_file_path):
         return "{}"
 
 def extract_tool_calls_from_response(response_text):
-    """从模型响应中提取<tool_calls>内容"""
+    """Extract <tool_calls> content from model response"""
     pattern = r'<tool_calls>\s*(.*?)\s*</tool_calls>'
     match = re.search(pattern, response_text, re.DOTALL)
     if match:
@@ -796,11 +796,11 @@ def extract_tool_calls_from_response(response_text):
         return None
 
 def extract_create_scene_from_response(response_text):
-    """从模型响应中提取<create_scene>内容
+    """Extract <create_scene> content from model response
     
-    支持两种格式：
-    1. 带groups的格式 (有room_envelope和groups字段)
-    2. 不带groups的格式 (有bounds_top/bounds_bottom和objects字段)
+    Supports two formats:
+    1. Grouped format (with room_envelope and groups fields)
+    2. Flat format (with bounds_top/bounds_bottom and objects fields)
     """
     pattern = r'<create_scene>\s*```json\s*(.*?)\s*```\s*</create_scene>'
     match = re.search(pattern, response_text, re.DOTALL)
@@ -809,16 +809,16 @@ def extract_create_scene_from_response(response_text):
             scene_json_str = match.group(1).strip()
             scene_data = json.loads(scene_json_str)
             
-            # 验证基本字段
+            # Validate basic fields
             if 'room_type' in scene_data and 'room_id' in scene_data:
-                # 两种格式都有效
+                # Both formats are valid
                 if 'groups' in scene_data or 'objects' in scene_data:
                     format_type = "grouped" if 'groups' in scene_data else "flat"
                     print(f"Successfully extracted scene in {format_type} format")
                     return scene_data
             
             print("Warning: Scene data missing required fields (room_type, room_id, and groups/objects)")
-            return scene_data  # 返回但发出警告
+            return scene_data  # Return but emit warning
         except json.JSONDecodeError as e:
             print(f"Error parsing create_scene JSON: {e}")
             return None
@@ -827,7 +827,7 @@ def extract_create_scene_from_response(response_text):
         return None
 
 def extract_conclusion_from_response(response_text):
-    """从模型响应中提取<conclusion>内容"""
+    """Extract <conclusion> content from model response"""
     pattern = r'<conclusion>\s*(.*?)\s*</conclusion>'
     match = re.search(pattern, response_text, re.DOTALL)
     if match:
@@ -838,7 +838,7 @@ def extract_conclusion_from_response(response_text):
         return None
 
 def extract_final_scene_from_response(response_text):
-    """从模型响应中提取<final_scene>内容（保留作为备用）"""
+    """Extract <final_scene> content from model response (kept as fallback)"""
     pattern = r'<final_scene>\s*```json\s*(.*?)\s*```\s*</final_scene>'
     match = re.search(pattern, response_text, re.DOTALL)
     if match:
@@ -864,56 +864,56 @@ def smart_truncate_conversation_history(
     system_prompt: str = None
 ) -> list:
     """
-    智能截断对话历史，确保剩余 token 空间足够生成响应。
+    Smart truncation of conversation history to ensure enough remaining token space for response generation.
     
-    当 max_model_len - num_tokens < max_tokens 时，从前面删除轮次，
-    直到有足够的空间用于生成。
+    When max_model_len - num_tokens < max_tokens, removes turns from the beginning
+    until there is enough space for generation.
     
     Args:
-        conversation_history: 完整的对话历史列表 [(user_msg, assistant_msg), ...]
-        current_user_message: 当前轮次的用户消息
-        current_image_path: 当前图片路径
-        engine: VllmEngine 实例（用于获取 tokenizer）
-        max_model_len: 模型最大上下文长度
-        max_tokens: 生成时需要保留的最大 token 数
-        system_prompt: 系统提示词（可选）
+        conversation_history: Complete conversation history list [(user_msg, assistant_msg), ...]
+        current_user_message: Current turn's user message
+        current_image_path: Current image path
+        engine: VllmEngine instance (for getting tokenizer)
+        max_model_len: Maximum model context length
+        max_tokens: Maximum tokens to reserve for generation
+        system_prompt: System prompt (optional)
     
     Returns:
-        截断后的对话历史列表
+        Truncated conversation history list
     """
     if not conversation_history:
         return []
     
-    # 获取 tokenizer
+    # Get tokenizer
     tokenizer = engine.tokenizer
     
     def estimate_tokens(messages: list, image_path: str = None) -> int:
-        """估算消息列表的 token 数量"""
+        """Estimate token count for a list of messages"""
         total_text = ""
         
-        # 添加系统提示词
+        # Add system prompt
         if system_prompt:
             total_text += system_prompt + "\n"
         
-        # 添加所有消息文本
+        # Add all message text
         for msg in messages:
             content = msg.get('content', '')
             total_text += content + "\n"
         
-        # 使用 tokenizer 编码文本
+        # Encode text using tokenizer
         try:
             tokens = tokenizer.encode(total_text, add_special_tokens=True)
             text_tokens = len(tokens)
         except Exception as e:
-            # 如果编码失败，使用粗略估算（每个字符约1.5个token）
+            # If encoding fails, use rough estimate (about 1.5 tokens per character)
             text_tokens = int(len(total_text) * 1.5)
         
-        # 图片 token 估算（Qwen2.5-VL 每张图片约 1280 tokens）
+        # Image token estimation (Qwen2.5-VL uses about 1280 tokens per image)
         image_tokens = 1280 if image_path else 0
         
         return text_tokens + image_tokens
     
-    # 构建完整消息列表用于估算
+    # Build complete message list for estimation
     def build_messages(history: list) -> list:
         messages = []
         for hist_user_msg, hist_assistant_msg in history:
@@ -924,30 +924,30 @@ def smart_truncate_conversation_history(
     
     truncated_history = list(conversation_history)
     
-    # 逐步删除最早的对话轮次，直到有足够空间
+    # Progressively remove oldest conversation turns until there is enough space
     while truncated_history:
         messages = build_messages(truncated_history)
         num_tokens = estimate_tokens(messages, current_image_path)
         remaining_tokens = max_model_len - num_tokens
         
         if remaining_tokens >= max_tokens:
-            # 空间足够
+            # Enough space
             if len(truncated_history) < len(conversation_history):
                 removed_count = len(conversation_history) - len(truncated_history)
                 print(f"⚠ Smart truncation: removed {removed_count} oldest turns "
                       f"(tokens: {num_tokens}, remaining: {remaining_tokens}, required: {max_tokens})")
             break
         else:
-            # 空间不足，删除最早的一轮对话
+            # Not enough space, remove the oldest conversation turn
             if len(truncated_history) > 0:
                 truncated_history.pop(0)
             else:
-                # 已经没有历史可删除了
+                # No more history to delete
                 print(f"⚠ Warning: Even without history, tokens ({num_tokens}) may exceed limit. "
                       f"Remaining: {remaining_tokens}, required: {max_tokens}")
                 break
     
-    # 如果删除了所有历史仍然不够，打印警告
+    # If all history is deleted and still not enough, print warning
     if not truncated_history and conversation_history:
         messages = build_messages([])
         num_tokens = estimate_tokens(messages, current_image_path)
@@ -958,16 +958,16 @@ def smart_truncate_conversation_history(
     return truncated_history
 
 def generate_empty_room_with_model(room_prompt: str, engine, request_config, output_path: str = None) -> tuple[Dict[str, Any], tuple[str, str]]:
-    """使用微调模型生成空房间结构
+    """Generate empty room structure using fine-tuned model
     
     Returns:
-        tuple: (room_data, (user_message, assistant_message)) 或 (None, None) 如果失败
+        tuple: (room_data, (user_message, assistant_message)) or (None, None) if failed
     """
     
     print(f"Generating empty room with fine-tuned model...")
     print(f"Room prompt: {room_prompt}")
     
-    # 构建消息 - 只有用户的文本需求，没有图片
+    # Build messages - only user's text requirement, no images
     user_message = room_prompt
     messages = [
         {
@@ -976,34 +976,34 @@ def generate_empty_room_with_model(room_prompt: str, engine, request_config, out
         }
     ]
     
-    # 创建推理请求（不需要图片）
+    # Create inference request (no images needed)
     infer_requests = [
         InferRequest(messages=messages, images=None),
     ]
     
     try:
-        # 执行推理
+        # Execute inference
         print("Requesting model to generate initial scene structure...")
         resp_list = engine.infer(infer_requests, request_config)
         response = resp_list[0].choices[0].message.content
         
         print(f"Model response length: {len(response)} characters")
         
-        # 保存模型响应（用于调试）
+        # Save model response (for debugging)
         if output_path:
             response_file = Path(output_path).parent / "initial_scene_generation_response.txt"
             with open(response_file, 'w', encoding='utf-8') as f:
                 f.write(response)
             print(f"Model response saved to: {response_file}")
         
-        # 提取<create_scene>内容
+        # Extract <create_scene> content
         room_data = extract_create_scene_from_response(response)
         
         if room_data is None:
             print("Failed to extract scene data from model response")
             return None, None
         
-        # 验证生成的房间结构
+        # Validate the generated room structure
         has_groups_or_objects = 'groups' in room_data or 'objects' in room_data
         if not has_groups_or_objects:
             print(f"Warning: Generated room has neither 'groups' nor 'objects' field")
@@ -1016,10 +1016,10 @@ def generate_empty_room_with_model(room_prompt: str, engine, request_config, out
         elif 'objects' in room_data:
             print(f"  Number of objects: {len(room_data.get('objects', []))}")
         
-        # **重要**：转换为flat格式后再保存
+        # **Important**: Convert to flat format before saving
         room_data_to_save = convert_grouped_to_flat(room_data) if 'groups' in room_data else room_data
         
-        # 保存到文件（如果指定了输出路径）
+        # Save to file (if output path specified)
         if output_path:
             output_file = Path(output_path)
             output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1027,7 +1027,7 @@ def generate_empty_room_with_model(room_prompt: str, engine, request_config, out
                 json.dump(room_data_to_save, f, indent=2, ensure_ascii=False)
             print(f"Empty room saved to: {output_file} (flat format)")
         
-        # 返回flat格式的场景数据和对话历史
+        # Return flat format scene data and conversation history
         return room_data_to_save, (user_message, response)
         
     except Exception as e:
@@ -1037,16 +1037,16 @@ def generate_empty_room_with_model(room_prompt: str, engine, request_config, out
         return None, None
 
 def generate_empty_room(room_prompt: str, output_path: str = None) -> Dict[str, Any]:
-    """使用Azure OpenAI生成空房间结构（仅包含房间边界，不包含物体）"""
+    """Generate empty room structure using Azure OpenAI (room boundaries only, no objects)"""
     
-    # 设置Azure OpenAI客户端
+    # Set up Azure OpenAI client
     try:
         client = setup_azure_client()
     except Exception as e:
         print(f"Failed to setup Azure OpenAI client: {e}")
         return None
     
-    # 构建系统提示
+    # Build system prompt
     system_prompt = """You are an expert interior designer and room layout specialist. Your task is to create an empty room structure based on user requirements.
 
 You must respond with a JSON structure that includes:
@@ -1116,13 +1116,13 @@ Example 2 - L-shaped room (6 points, clockwise from top-left):
 
 Respond ONLY with valid JSON, no additional text."""
 
-    # 构建用户提示
+    # Build user prompt
     user_prompt = f"""Create an empty room structure for: {room_prompt}
 
 Please generate a room that would be suitable for this description. Keep the objects list empty."""
 
     try:
-        # 调用Azure OpenAI API
+        # Call Azure OpenAI API
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
@@ -1133,13 +1133,13 @@ Please generate a room that would be suitable for this description. Keep the obj
             max_completion_tokens=2000
         )
         
-        # 提取响应内容
+        # Extract response content
         response_content = response.choices[0].message.content.strip()
         print(f"Generated room response length: {len(response_content)} characters")
         
-        # 尝试解析JSON响应
+        # Try to parse JSON response
         try:
-            # 如果响应包含```json标记，提取其中的JSON部分
+            # If response contains ```json markers, extract the JSON part
             if "```json" in response_content:
                 json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
                 if json_match:
@@ -1147,19 +1147,19 @@ Please generate a room that would be suitable for this description. Keep the obj
             
             room_data = json.loads(response_content)
             
-            # 验证生成的房间结构 - 检查是否有bounds
+            # Validate generated room structure - check for bounds
             if 'bounds_top' not in room_data or 'bounds_bottom' not in room_data:
                 print(f"Warning: Generated room missing bounds_top or bounds_bottom")
                 return None
             
-            # 确保有objects字段
+            # Ensure objects field exists
             if 'objects' not in room_data:
                 room_data['objects'] = []
             
-            # **重要**：转换为flat格式后再保存
+            # **Important**: Convert to flat format before saving
             room_data_to_save = convert_grouped_to_flat(room_data) if 'groups' in room_data else room_data
             
-            # 保存到文件（如果指定了输出路径）
+            # Save to file (if output path specified)
             if output_path:
                 output_file = Path(output_path)
                 output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1182,27 +1182,27 @@ Please generate a room that would be suitable for this description. Keep the obj
 def generate_scene_with_objects(room_prompt: str, output_path: str = None, 
                                  asset_retrieval_module=None, asset_source='3d-future',
                                  objaverse_retriever=None) -> Dict[str, Any]:
-    """使用Azure OpenAI生成包含物体的完整场景（扁平格式）
+    """Generate a complete scene with objects using Azure OpenAI (flat format)
     
     Args:
-        room_prompt: 用户的房间需求描述
-        output_path: 输出文件路径（可选）
-        asset_retrieval_module: 3D-FUTURE资产检索模块
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse资产检索模块
+        room_prompt: User's room requirement description
+        output_path: Output file path (optional)
+        asset_retrieval_module: 3D-FUTURE asset retrieval module
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retrieval module
         
     Returns:
-        Dict: 包含物体的完整场景数据（扁平格式），物体已完成资产检索
+        Dict: Complete scene data with objects (flat format), assets already retrieved
     """
     
-    # 设置Azure OpenAI客户端
+    # Set up Azure OpenAI client
     try:
         client = setup_azure_client()
     except Exception as e:
         print(f"Failed to setup Azure OpenAI client: {e}")
         return None
     
-    # 构建系统提示 - 生成带物体的完整场景
+    # Build system prompt - generate complete scene with objects
     system_prompt = """You are an expert interior designer and room layout specialist. Your task is to create a complete room layout with furniture based on user requirements.
 
 You must respond with a JSON structure in FLAT FORMAT that includes:
@@ -1285,7 +1285,7 @@ Example 2 - L-shaped room with objects (6 points, clockwise):
 
 Respond ONLY with valid JSON, no additional text."""
 
-    # 构建用户提示
+    # Build user prompt
     user_prompt = f"""Create a complete furnished room for: {room_prompt}
 
 Please generate a realistic room layout with appropriate furniture. Include detailed descriptions for each piece of furniture to enable accurate asset retrieval."""
@@ -1293,7 +1293,7 @@ Please generate a realistic room layout with appropriate furniture. Include deta
     try:
         print(f"Generating scene with GPT for: {room_prompt}")
         
-        # 调用Azure OpenAI API
+        # Call Azure OpenAI API
         response = client.chat.completions.create(
             model=AZURE_OPENAI_DEPLOYMENT_NAME,
             messages=[
@@ -1304,13 +1304,13 @@ Please generate a realistic room layout with appropriate furniture. Include deta
             max_completion_tokens=4000
         )
         
-        # 提取响应内容
+        # Extract response content
         response_content = response.choices[0].message.content.strip()
         print(f"Generated scene response length: {len(response_content)} characters")
         
-        # 尝试解析JSON响应
+        # Try to parse JSON response
         try:
-            # 如果响应包含```json标记，提取其中的JSON部分
+            # If response contains ```json markers, extract the JSON part
             if "```json" in response_content:
                 json_match = re.search(r'```json\s*(.*?)\s*```', response_content, re.DOTALL)
                 if json_match:
@@ -1318,7 +1318,7 @@ Please generate a realistic room layout with appropriate furniture. Include deta
             
             scene_data = json.loads(response_content)
             
-            # 验证生成的场景结构
+            # Validate generated scene structure
             if 'bounds_top' not in scene_data or 'bounds_bottom' not in scene_data:
                 print(f"Warning: Generated scene missing bounds_top or bounds_bottom")
                 return None
@@ -1327,13 +1327,13 @@ Please generate a realistic room layout with appropriate furniture. Include deta
                 print(f"Warning: Generated scene has no objects")
                 return None
             
-            # 转换为flat格式（如果需要）
+            # Convert to flat format (if needed)
             if 'groups' in scene_data:
                 scene_data = convert_grouped_to_flat(scene_data)
             
             print(f"GPT generated scene with {len(scene_data.get('objects', []))} objects")
             
-            # 进行资产检索
+            # Perform asset retrieval
             print("Starting asset retrieval for generated objects...")
             scene_data = retrieve_and_update_assets(
                 scene_data, 
@@ -1342,7 +1342,7 @@ Please generate a realistic room layout with appropriate furniture. Include deta
                 objaverse_retriever=objaverse_retriever
             )
             
-            # 保存到文件（如果指定了输出路径）
+            # Save to file (if output path specified)
             if output_path:
                 output_file = Path(output_path)
                 output_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1366,16 +1366,16 @@ Please generate a realistic room layout with appropriate furniture. Include deta
 
 def retrieve_and_update_assets(scene_data, asset_retrieval_module=None, 
                                 asset_source='3d-future', objaverse_retriever=None) -> Dict[str, Any]:
-    """为场景中的物体检索资产ID，并用retrieved_size替换原始size
+    """Retrieve asset IDs for objects in the scene and replace original size with retrieved_size
     
     Args:
-        scene_data: 场景数据（扁平格式）
-        asset_retrieval_module: 3D-FUTURE资产检索模块
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse资产检索模块
+        scene_data: Scene data (flat format)
+        asset_retrieval_module: 3D-FUTURE asset retrieval module
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retrieval module
         
     Returns:
-        Dict: 更新后的场景数据，包含uid和更新后的size
+        Dict: Updated scene data with uid and updated size
     """
     if not scene_data or 'objects' not in scene_data:
         return scene_data
@@ -1384,7 +1384,7 @@ def retrieve_and_update_assets(scene_data, asset_retrieval_module=None,
     
     updated_scene = None
     
-    # 根据资产来源选择检索策略
+    # Select retrieval strategy based on asset source
     if asset_source == 'objaverse' and objaverse_retriever:
         try:
             updated_scene = objaverse_retriever.sample_all_assets(scene_data, is_greedy_sampling=True)
@@ -1394,10 +1394,10 @@ def retrieve_and_update_assets(scene_data, asset_retrieval_module=None,
             print("Falling back to 3D-FUTURE retrieval...")
     
     elif asset_source == 'auto' and objaverse_retriever and asset_retrieval_module:
-        # 混合模式
+        # Hybrid mode
         try:
             updated_scene = asset_retrieval_module.sample_all_assets(scene_data, is_greedy_sampling=True)
-            # 检查是否有未检索到的物体
+            # Check for objects that failed retrieval
             needs_objaverse = False
             for obj in updated_scene.get('objects', []):
                 if not obj.get('jid') or obj.get('jid') in ['<NEED_RETRIEVAL>', '<NEED_RETRIVEAL>']:
@@ -1421,14 +1421,14 @@ def retrieve_and_update_assets(scene_data, asset_retrieval_module=None,
         print("Warning: Asset retrieval failed, returning original scene")
         return scene_data
     
-    # 用retrieved_size替换原始size
+    # Replace original size with retrieved_size
     objects_updated = 0
     for obj in updated_scene.get('objects', []):
         if 'retrieved_size' in obj and obj['retrieved_size']:
             original_size = obj.get('size', [])
             obj['size'] = obj['retrieved_size']
             objects_updated += 1
-            if objects_updated <= 3:  # 只打印前3个作为示例
+            if objects_updated <= 3:  # Only print the first 3 as examples
                 print(f"  Updated size for '{obj.get('desc', 'Unknown')[:40]}...': {original_size} -> {obj['size']}")
     
     if objects_updated > 3:
@@ -1439,32 +1439,32 @@ def retrieve_and_update_assets(scene_data, asset_retrieval_module=None,
     return updated_scene
 
 def apply_tool_calls_to_scene(initial_scene, tool_calls):
-    """使用 scene_editor 的 apply_tool_calls 函数来修改场景
+    """Use scene_editor's apply_tool_calls function to modify the scene
     
-    这个函数会自动处理格式转换：
-    1. 如果输入是不带groups的格式，先转换为带groups的格式
-    2. 应用tool_calls修改场景  
-    3. **始终返回flat格式**（不带groups）
+    This function automatically handles format conversion:
+    1. If input is in flat format (without groups), first convert to grouped format
+    2. Apply tool_calls to modify the scene  
+    3. **Always return flat format** (without groups)
     """
     if not apply_tool_calls:
         print("Warning: scene_editor not available, using fallback")
         return initial_scene
     
     try:
-        # 检测输入格式
+        # Detect input format
         is_flat_format = 'objects' in initial_scene and 'groups' not in initial_scene
         
-        # 如果是不带groups的格式，先转换为带groups的格式
+        # If in flat format (without groups), first convert to grouped format
         if is_flat_format:
             print("Detected flat format (without groups), converting to grouped format for editing...")
             scene_for_editing = convert_flat_to_grouped(initial_scene)
         else:
             scene_for_editing = initial_scene
         
-        # 使用 scene_editor 模块的 apply_tool_calls 函数
+        # Use scene_editor module's apply_tool_calls function
         edited_scene = apply_tool_calls(scene_for_editing, tool_calls)
         
-        # **关键**：始终转换回flat格式返回
+        # **Key**: Always convert back to flat format before returning
         final_scene = convert_grouped_to_flat(edited_scene) if 'groups' in edited_scene else edited_scene
         print("Returning scene in flat format (without groups)")
         
@@ -1476,41 +1476,41 @@ def apply_tool_calls_to_scene(initial_scene, tool_calls):
         return initial_scene
 
 def check_and_retrieve_assets(scene_data, asset_retrieval_module=None, asset_source='3d-future', objaverse_retriever=None):
-    """检查场景中是否有需要检索的资产，并进行检索
+    """Check if the scene has assets that need retrieval, and perform retrieval
     
-    支持两种格式：
-    1. 带groups的格式 (groups -> objects)
-    2. 不带groups的格式 (直接的objects数组)
+    Supports two formats:
+    1. Grouped format (groups -> objects)
+    2. Flat format (direct objects array)
     
-    参数：
-    - scene_data: 场景数据
-    - asset_retrieval_module: 3D-FUTURE 资产检索模块
-    - asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-    - objaverse_retriever: Objaverse 资产检索模块
+    Parameters:
+    - scene_data: Scene data
+    - asset_retrieval_module: 3D-FUTURE asset retrieval module
+    - asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+    - objaverse_retriever: Objaverse asset retrieval module
     """
     if not scene_data:
         return scene_data
     
     print(f"Checking for assets that need retrieval (source: {asset_source})...")
     
-    # 根据资产来源选择检索策略
+    # Select retrieval strategy based on asset source
     if asset_source == 'objaverse' and objaverse_retriever:
         try:
-            # 使用 Objaverse 检索模块
+            # Use Objaverse retrieval module
             updated_scene = objaverse_retriever.sample_all_assets(scene_data, is_greedy_sampling=True)
             print("Assets retrieval completed using Objaverse")
             return updated_scene
         except Exception as e:
             print(f"Error during Objaverse asset retrieval: {e}")
-            # 回退到 3D-FUTURE
+            # Fall back to 3D-FUTURE
             print("Falling back to 3D-FUTURE retrieval...")
     
     elif asset_source == 'auto' and objaverse_retriever and asset_retrieval_module:
-        # 混合模式：尝试 3D-FUTURE，失败则使用 Objaverse
+        # Hybrid mode: try 3D-FUTURE, fall back to Objaverse
         try:
             updated_scene = asset_retrieval_module.sample_all_assets(scene_data, is_greedy_sampling=True)
             
-            # 检查是否有检索失败的物体（保持 <NEED_RETRIEVAL>）
+            # Check for objects that failed retrieval (still have <NEED_RETRIEVAL>)
             needs_objaverse = False
             objects_list = []
             if 'groups' in updated_scene:
@@ -1533,38 +1533,38 @@ def check_and_retrieve_assets(scene_data, asset_retrieval_module=None, asset_sou
         except Exception as e:
             print(f"Error during auto asset retrieval: {e}")
     
-    # 默认：使用 3D-FUTURE 检索模块
+    # Default: use 3D-FUTURE retrieval module
     if asset_retrieval_module:
         try:
-            # 使用sample_all_assets方法，这与respace.py中的逻辑一致
+            # Use sample_all_assets method, consistent with the logic in respace.py
             updated_scene = asset_retrieval_module.sample_all_assets(scene_data, is_greedy_sampling=True)
             print("Assets retrieval completed using sample_all_assets (3D-FUTURE)")
             return updated_scene
         except Exception as e:
             print(f"Error during asset retrieval: {e}")
-            # 继续到后备逻辑
+            # Continue to fallback logic
     
-    # 后备逻辑：手动处理<NEED_RETRIEVAL>
+    # Fallback logic: manually handle <NEED_RETRIEVAL>
     print("Using fallback asset retrieval logic...")
     modified = False
     
-    # 处理带groups的格式
+    # Handle grouped format
     if 'groups' in scene_data:
         for group in scene_data.get('groups', []):
             for obj in group.get('objects', []):
                 if obj.get('jid') in ['<NEED_RETRIEVAL>', '<NEED_RETRIVEAL>'] or not obj.get('jid'):
                     print(f"Need to retrieve asset for object: {obj.get('desc', 'Unknown')}")
-                    # 生成一个占位符jid
+                    # Generate a placeholder jid
                     obj['jid'] = str(uuid.uuid4())
                     print(f"Using placeholder jid: {obj['jid']}")
                     modified = True
     
-    # 处理不带groups的格式（直接的objects数组）
+    # Handle flat format (direct objects array)
     elif 'objects' in scene_data:
         for obj in scene_data.get('objects', []):
             if obj.get('jid') in ['<NEED_RETRIEVAL>', '<NEED_RETRIVEAL>'] or not obj.get('jid'):
                 print(f"Need to retrieve asset for object: {obj.get('desc', 'Unknown')}")
-                # 生成一个占位符jid
+                # Generate a placeholder jid
                 obj['jid'] = str(uuid.uuid4())
                 print(f"Using placeholder jid: {obj['jid']}")
                 modified = True
@@ -1578,9 +1578,9 @@ def check_and_retrieve_assets(scene_data, asset_retrieval_module=None, asset_sou
 
 
 def _predownload_objaverse_glbs(scene_data):
-    """在渲染前预先下载 Objaverse GLB 文件
+    """Pre-download Objaverse GLB files before rendering
     
-    这样 Blender 子进程只需要从本地缓存读取，不需要安装 objaverse 包
+    This way the Blender subprocess only needs to read from local cache, without needing the objaverse package installed
     """
     try:
         from utils.objaverse_glb_manager import get_objaverse_glb_path
@@ -1588,7 +1588,7 @@ def _predownload_objaverse_glbs(scene_data):
         print("Warning: objaverse_glb_manager not available, skipping GLB pre-download")
         return
     
-    # 提取所有需要下载的 Objaverse UIDs
+    # Extract all Objaverse UIDs that need to be downloaded
     objects_list = []
     if 'groups' in scene_data:
         for group in scene_data.get('groups', []):
@@ -1622,32 +1622,32 @@ def _predownload_objaverse_glbs(scene_data):
 
 
 def render_scene_to_image(scene_data, output_dir, iteration, enable_visualization=False):
-    """使用Blender渲染场景并返回合并图片路径
+    """Render scene using Blender and return merged image path
     
     Args:
-        scene_data: 场景数据
-        output_dir: 输出目录
-        iteration: 迭代次数
-        enable_visualization: 是否启用3D可视化辅助线
+        scene_data: Scene data
+        output_dir: Output directory
+        iteration: Iteration number
+        enable_visualization: Whether to enable 3D visualization guide lines
     """
     try:
         print(f"Rendering scene for iteration {iteration}...")
         
-        # 预先下载 Objaverse GLB 文件（在主进程中下载，避免 Blender 子进程需要安装 objaverse 包）
+        # Pre-download Objaverse GLB files (download in main process to avoid Blender subprocess needing the objaverse package)
         _predownload_objaverse_glbs(scene_data)
         
-        # 创建临时输出目录
+        # Create temporary output directory
         temp_output_dir = Path(output_dir) / f"temp_render_{iteration}"
         temp_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 设置环境变量控制Blender输出
-        os.environ['BPY_VERBOSE'] = '0'  # 减少输出
-        # 不强制使用占位符，让Blender渲染器尝试加载真实的3D模型
+        # Set environment variables to control Blender output
+        os.environ['BPY_VERBOSE'] = '0'  # Reduce output
+        # Don't force placeholder usage, let Blender renderer try to load real 3D models
         os.environ['BPY_USE_PLACEHOLDER_ONLY'] = '0'
-        # 设置3D可视化环境变量
+        # Set 3D visualization environment variables
         os.environ['BPY_ENABLE_VISUALIZATION'] = '1' if enable_visualization else '0'
         
-        # 使用Blender渲染包装器
+        # Use Blender rendering wrapper
         if render_scene_with_bpy:
             scene_id = f"scene_iter_{iteration}"
             render_result = render_scene_with_bpy(scene_data, temp_output_dir, scene_id)
@@ -1655,13 +1655,13 @@ def render_scene_to_image(scene_data, output_dir, iteration, enable_visualizatio
         else:
             print("No rendering function available, creating placeholder")
             
-        # 查找生成的图片文件
+        # Find generated image files
         top_file = temp_output_dir / "top" / "frame.png"
         diag_file = temp_output_dir / "diag" / "frame.png"
         
         if top_file.exists() and diag_file.exists():
             try:
-                # 使用带边界框和标签的图像合并函数
+                # Use the image merge function with bounding boxes and labels
                 import importlib.util
                 spec = importlib.util.spec_from_file_location(
                     "image_merger", 
@@ -1671,13 +1671,13 @@ def render_scene_to_image(scene_data, output_dir, iteration, enable_visualizatio
                 spec.loader.exec_module(image_merger)
                 merge_rendered_views_with_annotations = image_merger.merge_rendered_views_with_annotations
                 
-                # 保存合并图片
+                # Save merged image
                 merged_path = Path(output_dir) / f"merged_iter_{iteration}.png"
                 merge_rendered_views_with_annotations(str(top_file), str(diag_file), str(merged_path))
                 
                 print(f"Rendered and merged image saved to: {merged_path}")
                 
-                # 清理临时目录
+                # Clean up temporary directory
                 try:
                     shutil.rmtree(temp_output_dir)
                 except:
@@ -1689,29 +1689,29 @@ def render_scene_to_image(scene_data, output_dir, iteration, enable_visualizatio
                 print(f"Error processing rendered images: {img_error}")
                 import traceback
                 traceback.print_exc()
-                # 继续到创建占位符图片
+                # Continue to creating placeholder image
         
-        # 如果渲染失败或图片处理失败，创建占位符图片
+        # If rendering failed or image processing failed, create placeholder image
         print("Creating placeholder image...")
         try:
             from PIL import Image, ImageDraw
             
-            # 创建占位符图片
+            # Create placeholder image
             img = Image.new('RGB', (1024, 512), color='lightgray')
             draw = ImageDraw.Draw(img)
             
-            # 计算对象数量
+            # Count objects
             objects_count = 0
             if 'groups' in scene_data:
                 objects_count = sum(len(group.get('objects', [])) for group in scene_data.get('groups', []))
             elif 'objects' in scene_data:
                 objects_count = len(scene_data.get('objects', []))
             
-            # 绘制信息
+            # Draw information
             text = f"Iteration {iteration}\n{objects_count} objects/groups\nPlaceholder Image"
             draw.text((50, 200), text, fill='black')
             
-            # 保存占位符图片
+            # Save placeholder image
             placeholder_path = Path(output_dir) / f"placeholder_iter_{iteration}.png"
             img.save(placeholder_path)
             
@@ -1729,13 +1729,13 @@ def render_scene_to_image(scene_data, output_dir, iteration, enable_visualizatio
         return './test/init.png'
 
 def create_iteration_summary_image(output_dir, all_image_paths, num_iterations):
-    """将所有迭代的图片合成为一张大图"""
+    """Composite all iteration images into one large image"""
     try:
         from PIL import Image, ImageDraw, ImageFont
         
         print("Creating iteration summary image...")
         
-        # 过滤出存在的图片文件
+        # Filter out existing image files
         valid_images = []
         for i, img_path in enumerate(all_image_paths):
             if Path(img_path).exists():
@@ -1747,43 +1747,43 @@ def create_iteration_summary_image(output_dir, all_image_paths, num_iterations):
             print("No valid images found for summary")
             return None
         
-        # 加载第一张图片来获取尺寸
+        # Load first image to get dimensions
         first_img = Image.open(valid_images[0][1])
         img_width, img_height = first_img.size
         
-        # 计算网格布局 - 尽量接近正方形
+        # Calculate grid layout - as close to square as possible
         import math
         cols = math.ceil(math.sqrt(len(valid_images)))
         rows = math.ceil(len(valid_images) / cols)
         
-        # 计算合成图片的尺寸
+        # Calculate composite image dimensions
         margin = 20
         label_height = 40
         cell_width = img_width + margin
         cell_height = img_height + label_height + margin
         
         total_width = cols * cell_width + margin
-        total_height = rows * cell_height + margin + 60  # 额外空间给标题
+        total_height = rows * cell_height + margin + 60  # Extra space for title
         
-        # 创建大图 - 使用RGBA模式支持透明通道，背景完全透明
+        # Create large image - use RGBA mode to support alpha channel, fully transparent background
         summary_img = Image.new('RGBA', (total_width, total_height), color=(0, 0, 0, 0))
         draw = ImageDraw.Draw(summary_img)
         
-        # 尝试加载字体
+        # Try to load font
         try:
-            # 尝试使用系统字体
+            # Try to use system font
             font_title = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 24)
             font_label = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 16)
         except:
             try:
-                # 备用字体
+                # Fallback font
                 font_title = ImageFont.load_default()
                 font_label = ImageFont.load_default()
             except:
                 font_title = None
                 font_label = None
         
-        # 绘制标题
+        # Draw title
         title = f"Scene Generation Progress ({len(valid_images)} iterations)"
         if font_title:
             title_bbox = draw.textbbox((0, 0), title, font=font_title)
@@ -1794,30 +1794,30 @@ def create_iteration_summary_image(output_dir, all_image_paths, num_iterations):
         
         draw.text((title_x, 20), title, fill=(0, 0, 0, 255), font=font_title)
         
-        # 绘制每个迭代的图片
+        # Draw each iteration's image
         for idx, (iter_num, img_path) in enumerate(valid_images):
             row = idx // cols
             col = idx % cols
             
-            # 计算位置
+            # Calculate position
             x = col * cell_width + margin
-            y = row * cell_height + margin + 60  # 60是标题区域的高度
+            y = row * cell_height + margin + 60  # 60 is the title area height
             
-            # 加载并粘贴图片
+            # Load and paste image
             try:
                 img = Image.open(img_path)
-                # 转换为RGBA模式以确保透明度支持
+                # Convert to RGBA mode to ensure transparency support
                 if img.mode != 'RGBA':
                     img = img.convert('RGBA')
                 
-                # 如果图片尺寸不匹配，调整大小
+                # Resize if image dimensions don't match
                 if img.size != (img_width, img_height):
                     img = img.resize((img_width, img_height), Image.Resampling.LANCZOS)
                 
-                # 使用alpha合成粘贴图片，保持透明度
+                # Use alpha composite to paste image, preserving transparency
                 summary_img.paste(img, (x, y), img)
                 
-                # 添加标签
+                # Add label
                 if iter_num == 0:
                     label = "Initial Scene"
                 else:
@@ -1835,12 +1835,12 @@ def create_iteration_summary_image(output_dir, all_image_paths, num_iterations):
                 
             except Exception as e:
                 print(f"Error processing image {img_path}: {e}")
-                # 绘制占位符
+                # Draw placeholder
                 draw.rectangle([x, y, x + img_width, y + img_height], fill=(211, 211, 211, 255), outline=(128, 128, 128, 255))
                 error_text = f"Error: {iter_num}"
                 draw.text((x + 10, y + img_height // 2), error_text, fill=(255, 0, 0, 255), font=font_label)
         
-        # 保存合成图片 - 保存为PNG格式并保留透明通道
+        # Save composite image - save as PNG format preserving alpha channel
         output_path = Path(output_dir)
         summary_path = output_path / "iteration_summary.png"
         summary_img.save(summary_path, "PNG", optimize=True)
@@ -1859,31 +1859,31 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                              initial_conversation=None, asset_source='3d-future', objaverse_retriever=None,
                              enable_visualization=False, enable_physics_feedback=False, enable_vlm_feedback=False,
                              enable_physics_optimization=False, physics_opt_steps=5, models_path=None):
-    """执行迭代式场景生成
+    """Execute iterative scene generation
     
     Args:
         initial_conversation: tuple (user_message, assistant_message) from initial scene generation
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse 资产检索器实例
-        enable_visualization: 是否启用3D可视化辅助线
-        enable_physics_feedback: 是否启用物理反馈注入
-        enable_vlm_feedback: 是否启用VLM布局反馈注入
-        enable_physics_optimization: 是否启用物理优化（碰撞/出界修复）
-        physics_opt_steps: 物理优化最大步数
-        models_path: 3D模型路径
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retriever instance
+        enable_visualization: Whether to enable 3D visualization guide lines
+        enable_physics_feedback: Whether to enable physics feedback injection
+        enable_vlm_feedback: Whether to enable VLM layout feedback injection
+        enable_physics_optimization: Whether to enable physics optimization (collision/out-of-bounds fix)
+        physics_opt_steps: Maximum physics optimization steps
+        models_path: Path to 3D models
     """
     
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # 读取初始场景
+    # Read initial scene
     with open(initial_scene_path, 'r', encoding='utf-8') as f:
         current_scene = json.load(f)
     
-    # 保存所有图片路径用于最后的合成
+    # Save all image paths for final composition
     all_image_paths = []
     
-    # 渲染初始场景作为第一张图片，而不是使用硬编码路径
+    # Render initial scene as first image instead of using hardcoded path
     print("Rendering initial scene...")
     current_image_path = render_scene_to_image(current_scene, output_path, 0, enable_visualization=enable_visualization)
     all_image_paths.append(current_image_path)
@@ -1892,30 +1892,30 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
     print(f"Starting iterative scene generation with {num_iterations} iterations...")
     print(f"Initial prompt: {user_prompt}")
     
-    # 保存所有生成的场景
+    # Save all generated scenes
     all_scenes = []
     
-    # 保存完整的对话历史，包含每轮的用户请求和模型响应
+    # Save complete conversation history including user requests and model responses for each turn
     conversation_history = []
     
-    # 如果有初始对话（来自场景生成），添加到历史中
+    # If there is an initial conversation (from scene generation), add to history
     if initial_conversation is not None:
         conversation_history.append(initial_conversation)
         print(f"Added initial scene generation conversation to history")
     
-    # 初始化反馈生成所需的组件
-    last_feedback = ""  # 存储上一轮生成的反馈
+    # Initialize components needed for feedback generation
+    last_feedback = ""  # Store feedback generated from the previous round
     trimesh_metrics_instance = None
     azure_client_for_feedback = None
     
-    # 尝试初始化物理评估器
+    # Try to initialize physics evaluator
     try:
         trimesh_metrics_instance = TrimeshPhysicsMetrics(verbose=False)
         print("Initialized TrimeshPhysicsMetrics for feedback generation")
     except Exception as e:
         print(f"Warning: Could not initialize TrimeshPhysicsMetrics: {e}")
     
-    # 尝试初始化Azure客户端（用于VLM布局反馈）
+    # Try to initialize Azure client (for VLM layout feedback)
     try:
         azure_client_for_feedback = setup_azure_client()
         print("Initialized Azure client for VLM layout feedback")
@@ -1927,29 +1927,29 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
         print(f"ITERATION {iteration + 1}/{num_iterations}")
         print(f"{'='*50}")
         
-        # 构建当前迭代的用户内容
+        # Build current iteration's user content
         current_scene_json = json.dumps(current_scene, indent=2)
         
-        # 构建基础用户内容（包含反馈，如果有的话）
+        # Build base user content (including feedback if available)
         if iteration == 0:
-            # 第一轮：初始请求（无反馈）
+            # First iteration: initial request (no feedback)
             base_user_content = f'{user_prompt}\n\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
         else:
-            # 后续轮次：继续优化场景，包含反馈
+            # Subsequent turns: continue optimizing the scene, including feedback
             feedback_section = ""
             if last_feedback:
                 feedback_section = f'\n<feedback>\n{last_feedback}\n</feedback>\n'
                 print(f"Injecting feedback: {last_feedback[:100]}...")
             base_user_content = f'Please continue to improve the scene based on the original request: "{user_prompt}"{feedback_section}\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
         
-        # 构建完整的消息列表，包含历史对话
+        # Build complete message list including conversation history
         messages = []
         
-        # 添加当前轮次的用户消息
+        # Add current turn's user message
         current_user_message = f'<image>{base_user_content}'
         
-        # 使用智能截断：基于 token 数量而非固定轮次
-        # 配置：max_model_len=40960, max_tokens=16384
+        # Use smart truncation: based on token count rather than fixed turns
+        # Configuration: max_model_len=40960, max_tokens=16384
         truncated_history = smart_truncate_conversation_history(
             conversation_history=conversation_history,
             current_user_message=current_user_message,
@@ -1959,43 +1959,43 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
             max_tokens=request_config.max_tokens if request_config.max_tokens else 16384
         )
         
-        # 如果有对话历史，添加到消息列表中
+        # If there is conversation history, add to message list
         if truncated_history:
-            # 添加历史对话
+            # Add historical conversations
             for hist_user_msg, hist_assistant_msg in truncated_history:
                 messages.append({'role': 'user', 'content': hist_user_msg})
                 messages.append({'role': 'assistant', 'content': hist_assistant_msg})
         
         messages.append({'role': 'user', 'content': current_user_message})
         
-        # 创建推理请求
+        # Create inference request
         infer_requests = [
             InferRequest(messages=messages,
                         images=[current_image_path]),
         ]
         
-        # 执行推理
+        # Execute inference
         print("Generating response from model...")
         resp_list = engine.infer(infer_requests, request_config)
         response = resp_list[0].choices[0].message.content
         
         print(f"Response length: {len(response)} characters")
         
-        # 保存响应
+        # Save response
         with open(output_path / f"response_iter_{iteration + 1}.txt", 'w', encoding='utf-8') as f:
             f.write(response)
         
-        # 将当前轮次的对话添加到历史中
+        # Add current turn's conversation to history
         conversation_history.append((current_user_message, response))
         
-        # 首先尝试提取 tool_calls
+        # First try to extract tool_calls
         tool_calls = extract_tool_calls_from_response(response)
         final_scene = None
         
         if tool_calls is not None:
             print(f"Extracted {len(tool_calls)} tool calls")
             
-            # 检查是否有terminate工具调用
+            # Check for terminate tool call
             has_terminate = False
             for tool_call in tool_calls:
                 if isinstance(tool_call, dict) and tool_call.get('name') == 'terminate':
@@ -2004,13 +2004,13 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                     print(f"🛑 Terminate tool detected: {terminate_reason}")
                     break
             
-            # 如果发现terminate工具，停止迭代
+            # If terminate tool found, stop iterations
             if has_terminate:
                 print(f"Stopping iterations early due to terminate tool call")
-                # **重要**：转换为flat格式后再保存
+                # **Important**: Convert to flat format before saving
                 scene_to_save = convert_grouped_to_flat(current_scene) if 'groups' in current_scene else current_scene
                 
-                # 应用物理优化（碰撞/出界修复）- 最后一轮也要优化
+                # Apply physics optimization (collision/out-of-bounds fix) - also optimize on last round
                 if enable_physics_optimization:
                     print(f"Applying final physics optimization before saving...")
                     scene_to_save, _ = apply_physics_optimization(
@@ -2025,21 +2025,21 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                 print(f"Final scene saved to: {scene_file_path}")
                 break
             
-            # 使用 scene_editor 应用工具调用来生成最终场景
+            # Use scene_editor to apply tool calls to generate final scene
             final_scene = apply_tool_calls_to_scene(current_scene, tool_calls)
             print("Applied tool calls to generate final scene")
         else:
-            # 如果没有找到 tool_calls，尝试提取 final_scene（作为备用）
+            # If no tool_calls found, try to extract final_scene (as fallback)
             print("No tool_calls found, trying to extract final_scene as fallback")
             final_scene = extract_final_scene_from_response(response)
         
         if final_scene is None:
             print(f"⚠ No executable commands found in iteration {iteration + 1}. Ending generation and saving current state.")
             
-            # 保存当前状态为 final
+            # Save current state as final
             scene_to_save = convert_grouped_to_flat(current_scene) if 'groups' in current_scene else current_scene
             
-            # 应用物理优化（碰撞/出界修复）- 最后一轮也要优化
+            # Apply physics optimization (collision/out-of-bounds fix) - also optimize on last round
             if enable_physics_optimization:
                 print(f"Applying final physics optimization before saving...")
                 scene_to_save, _ = apply_physics_optimization(
@@ -2057,12 +2057,12 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
         
         print(f"Extracted final_scene with {len(final_scene.get('groups', final_scene.get('objects', [])))} objects/groups")
         
-        # 检索需要的资产
+        # Retrieve required assets
         final_scene = check_and_retrieve_assets(final_scene, asset_retrieval_module, 
                                                  asset_source=asset_source, 
                                                  objaverse_retriever=objaverse_retriever)
         
-        # 应用物理优化（碰撞/出界修复）
+        # Apply physics optimization (collision/out-of-bounds fix)
         physics_deleted_feedback = ""
         if enable_physics_optimization:
             print(f"Applying physics optimization...")
@@ -2072,37 +2072,37 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                 max_steps=physics_opt_steps
             )
         
-        # **重要**：转换为flat格式（不带groups）后再保存
+        # **Important**: Convert to flat format (without groups) before saving
         final_scene_to_save = convert_grouped_to_flat(final_scene) if 'groups' in final_scene else final_scene
         
-        # 保存当前场景（flat格式）
+        # Save current scene (flat format)
         scene_file_path = output_path / f"scene_iter_{iteration + 1}.json"
         with open(scene_file_path, 'w', encoding='utf-8') as f:
             json.dump(final_scene_to_save, f, indent=2, ensure_ascii=False)
         
         all_scenes.append(final_scene_to_save)
         
-        # 渲染场景为图片（使用flat格式）
+        # Render scene as image (using flat format)
         current_image_path = render_scene_to_image(final_scene_to_save, output_path, iteration + 1, enable_visualization=enable_visualization)
         all_image_paths.append(current_image_path)
         
-        # 更新当前场景为下一次迭代做准备（使用flat格式）
+        # Update current scene for next iteration (using flat format)
         current_scene = final_scene_to_save
         
-        # ===== 生成反馈用于下一轮 =====
-        # 只在非最后一轮生成反馈
+        # ===== Generate feedback for next round =====
+        # Only generate feedback on non-last rounds
         if iteration < num_iterations - 1:
             feedback_parts = []
             
-            # 0. 物理优化删除物品反馈（优先添加）
+            # 0. Physics optimization deleted objects feedback (add first)
             if physics_deleted_feedback:
                 feedback_parts.append(physics_deleted_feedback)
                 print(f"Physics deleted feedback: {physics_deleted_feedback}")
             
-            # 1. 物理反馈（来自trimesh）
+            # 1. Physics feedback (from trimesh)
             if enable_physics_feedback and trimesh_metrics_instance is not None:
                 try:
-                    # 使用grouped格式进行物理评估
+                    # Use grouped format for physics evaluation
                     scene_for_eval = convert_flat_to_grouped(final_scene_to_save) if 'objects' in final_scene_to_save else final_scene_to_save
                     trimesh_metrics = trimesh_metrics_instance.evaluate_scene(scene_for_eval, format_type='ours')
                     physics_feedback = generate_physics_feedback(trimesh_metrics, top_k=3)
@@ -2112,7 +2112,7 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                 except Exception as e:
                     print(f"Warning: Physics feedback generation failed: {e}")
             
-            # 2. VLM布局反馈（来自Azure GPT-5.1）
+            # 2. VLM layout feedback (from Azure GPT-5.1)
             if enable_vlm_feedback and azure_client_for_feedback is not None and current_image_path and Path(current_image_path).exists():
                 try:
                     layout_feedback = generate_vlm_layout_feedback_azure(
@@ -2126,7 +2126,7 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                 except Exception as e:
                     print(f"Warning: VLM layout feedback generation failed: {e}")
             
-            # 组合反馈
+            # Combine feedback
             if feedback_parts:
                 last_feedback = " ".join(feedback_parts)
                 print(f"Combined feedback for next iteration: {last_feedback}")
@@ -2135,7 +2135,7 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
         
         print(f"Iteration {iteration + 1} completed successfully")
     
-    # 保存完整的对话历史到文件
+    # Save complete conversation history to file
     if conversation_history:
         with open(output_path / "conversation_history.txt", 'w', encoding='utf-8') as f:
             for i, (user_msg, assistant_msg) in enumerate(conversation_history, 1):
@@ -2145,7 +2145,7 @@ def iterative_scene_generation(initial_scene_path, user_prompt, engine, request_
                 f.write("-" * 80 + "\n\n")
         print(f"Saved {len(conversation_history)} conversation turns to conversation_history.txt")
     
-    # 生成迭代过程合成图
+    # Generate iteration process composite image
     print(f"\n{'='*50}")
     print("CREATING ITERATION SUMMARY")
     print(f"{'='*50}")
@@ -2210,35 +2210,35 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                                               physics_opt_steps: int = 5,
                                               models_path: str = None,
                                               original_indices: List[int] = None):
-    """并行批量迭代场景生成 - 在每个迭代步骤中同时处理所有prompt
+    """Parallel batch iterative scene generation - process all prompts simultaneously at each iteration step
     
     Args:
-        prompts: prompts列表
-        engine: 推理引擎
-        request_config: 请求配置
-        initial_scene_path: 初始场景JSON文件路径（如果不生成空房间）
-        asset_retrieval_module: 资产检索模块
-        num_iterations: 每个prompt的迭代次数
-        output_base_dir: 输出基础目录
-        generate_room: 是否生成空房间
-        use_model_for_creation: 是否使用模型生成初始场景
-        use_gpt_with_objects: 是否使用GPT生成带物体的完整场景
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse 资产检索器实例
-        enable_visualization: 是否启用3D可视化辅助线
-        max_batch_size: 并行推理的最大批处理大小，防止OOM
-        max_history_turns: 保留的最大对话历史轮数
-        enable_physics_feedback: 是否启用物理反馈注入
-        enable_vlm_feedback: 是否启用VLM布局反馈注入
-        enable_physics_optimization: 是否启用物理优化（碰撞/出界修复）
-        physics_opt_steps: 物理优化最大步数
-        models_path: 3D模型路径
-        original_indices: 原始prompt索引列表(1-indexed)，用于跳过已完成场景时保持索引一致
+        prompts: List of prompts
+        engine: Inference engine
+        request_config: Request configuration
+        initial_scene_path: Initial scene JSON file path (if not generating empty room)
+        asset_retrieval_module: Asset retrieval module
+        num_iterations: Number of iterations per prompt
+        output_base_dir: Base output directory
+        generate_room: Whether to generate empty room
+        use_model_for_creation: Whether to use model to generate initial scene
+        use_gpt_with_objects: Whether to use GPT to generate complete scene with objects
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retriever instance
+        enable_visualization: Whether to enable 3D visualization guide lines
+        max_batch_size: Maximum batch size for parallel inference to prevent OOM
+        max_history_turns: Maximum number of conversation history turns to keep
+        enable_physics_feedback: Whether to enable physics feedback injection
+        enable_vlm_feedback: Whether to enable VLM layout feedback injection
+        enable_physics_optimization: Whether to enable physics optimization (collision/out-of-bounds fix)
+        physics_opt_steps: Maximum physics optimization steps
+        models_path: Path to 3D models
+        original_indices: Original prompt index list (1-indexed), for maintaining index consistency when skipping completed scenes
     
     Returns:
-        所有场景的结果列表
+        List of results for all scenes
     """
-    # 如果没有提供原始索引，使用默认的1到N
+    # If no original indices provided, use default 1 to N
     if original_indices is None:
         original_indices = list(range(1, len(prompts) + 1))
     
@@ -2247,25 +2247,25 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
     print(f"Processing {len(prompts)} prompts in parallel with {num_iterations} iterations each")
     print(f"{'='*60}\n")
     
-    # 初始化反馈生成所需的组件
+    # Initialize components needed for feedback generation
     trimesh_metrics_instance = None
     azure_client_for_feedback = None
     
-    # 尝试初始化物理评估器
+    # Try to initialize physics evaluator
     try:
         trimesh_metrics_instance = TrimeshPhysicsMetrics(verbose=False)
         print("Initialized TrimeshPhysicsMetrics for feedback generation")
     except Exception as e:
         print(f"Warning: Could not initialize TrimeshPhysicsMetrics: {e}")
     
-    # 尝试初始化Azure客户端（用于VLM布局反馈）
+    # Try to initialize Azure client (for VLM layout feedback)
     try:
         azure_client_for_feedback = setup_azure_client()
         print("Initialized Azure client for VLM layout feedback")
     except Exception as e:
         print(f"Warning: Could not initialize Azure client for feedback: {e}")
     
-    # 创建收集文件夹（提前创建，每完成一个就立即收集）
+    # Create collection folder (create in advance, collect immediately upon completion)
     output_base_path = Path(output_base_dir)
     final_scenes_dir = output_base_path / "final_scenes_collection"
     final_renders_dir = output_base_path / "final_renders_collection"
@@ -2275,15 +2275,15 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
     print(f"  Final scenes: {final_scenes_dir}")
     print(f"  Final renders: {final_renders_dir}")
     
-    # 用于跟踪收集数量
+    # For tracking collection count
     collected_scenes_count = 0
     collected_renders_count = 0
     
-    # 为每个prompt准备输出目录和初始化数据
+    # Prepare output directories and initialization data for each prompt
     prompt_contexts = []
     
     for list_idx, prompt in enumerate(prompts):
-        # 使用原始索引而不是列表索引
+        # Use original index instead of list index
         original_idx = original_indices[list_idx]
         
         # Parse prompt for embedded scene
@@ -2292,12 +2292,12 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
         prompt_output_dir = Path(output_base_dir) / f"prompt_{original_idx}"
         prompt_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 保存prompt到文件
+        # Save prompt to file
         with open(prompt_output_dir / "prompt.txt", 'w', encoding='utf-8') as f:
             f.write(prompt_text)
         
         context = {
-            "idx": original_idx,  # 使用原始索引
+            "idx": original_idx,  # Use original index
             "prompt": prompt_text,
             "output_dir": prompt_output_dir,
             "status": "initializing",
@@ -2307,18 +2307,18 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
             "all_scenes": [],
             "all_image_paths": [],
             "error": None,
-            "last_feedback": "",  # 存储上一轮生成的反馈
+            "last_feedback": "",  # Store feedback generated from previous round
             "embedded_scene": embedded_scene  # Store embedded scene
         }
         prompt_contexts.append(context)
     
-    # 第一步：并行生成或加载初始场景
+    # Step 1: Generate or load initial scenes in parallel
     print(f"\n{'='*60}")
     print(f"STEP 0: Initializing scenes for {len(prompts)} prompts")
     print(f"{'='*60}\n")
     
     if use_gpt_with_objects:
-        # 使用GPT生成带物体的完整场景
+        # Use GPT to generate complete scene with objects
         print("Generating complete scenes with GPT (including furniture objects)...")
         
         for ctx in prompt_contexts:
@@ -2333,7 +2333,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 with open(scene_path, 'w', encoding='utf-8') as f:
                     json.dump(ctx["embedded_scene"], f, indent=2, ensure_ascii=False)
             else:
-                # 使用GPT生成带物体的完整场景
+                # Use GPT to generate complete scene with objects
                 print(f"Generating complete scene with GPT for prompt {ctx['idx']}...")
                 try:
                     generated_scene_path = ctx["output_dir"] / "generated_scene_with_objects.json"
@@ -2351,7 +2351,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         ctx["status"] = "initialized"
                         print(f"✓ Prompt {ctx['idx']}: Complete scene with objects generated")
                     else:
-                        # 回退到生成空房间
+                        # Fall back to generating empty room
                         print(f"⚠ Prompt {ctx['idx']}: GPT scene generation failed, falling back to empty room")
                         generated_room_path = ctx["output_dir"] / "generated_empty_room.json"
                         room_data = generate_empty_room(ctx["prompt"], str(generated_room_path))
@@ -2369,7 +2369,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                     print(f"✗ Prompt {ctx['idx']}: Scene generation error - {e}")
     
     elif generate_room:
-        # 并行生成空房间
+        # Generate empty rooms in parallel
         print("Generating empty rooms in parallel...")
         
         # Identify contexts that need generation vs those with embedded scenes
@@ -2402,7 +2402,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                     room_data = extract_create_scene_from_response(response)
                     
                     if room_data is not None:
-                        # 保存生成的房间
+                        # Save generated room
                         generated_room_path = ctx["output_dir"] / "generated_empty_room.json"
                         with open(generated_room_path, 'w', encoding='utf-8') as f:
                             json.dump(room_data, f, indent=2, ensure_ascii=False)
@@ -2422,7 +2422,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         ctx["status"] = "failed"
                         ctx["error"] = f"Room generation error: {str(e)}"
     else:
-        # 使用相同的初始场景
+        # Use the same initial scene
         if not initial_scene_path or not Path(initial_scene_path).exists():
             print(f"Error: Initial scene file not found: {initial_scene_path}")
             return []
@@ -2435,7 +2435,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
             ctx["status"] = "initialized"
         print(f"✓ Loaded initial scene for all {len(prompts)} prompts")
     
-    # 为所有prompt渲染初始场景
+    # Render initial scenes for all prompts
     print("\nRendering initial scenes...")
     for ctx in prompt_contexts:
         if ctx["status"] == "initialized":
@@ -2453,7 +2453,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 ctx["status"] = "failed"
                 ctx["error"] = f"Rendering error: {str(e)}"
     
-    # 并行迭代优化
+    # Parallel iterative optimization
     active_contexts = [ctx for ctx in prompt_contexts if ctx["status"] == "initialized"]
     
     for iteration in range(num_iterations):
@@ -2466,26 +2466,26 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
         print(f"Processing {len(active_contexts)} active prompts")
         print(f"{'='*60}\n")
         
-        # 准备所有活跃prompt的推理请求
+        # Prepare inference requests for all active prompts
         infer_requests = []
         for ctx in active_contexts:
             current_scene_json = json.dumps(ctx["current_scene"], indent=2)
             
             if iteration == 0:
-                # 第一轮：无反馈
+                # First round: no feedback
                 base_user_content = f'{ctx["prompt"]}\n\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
             else:
-                # 后续轮次：包含反馈（如果有）
+                # Subsequent turns: include feedback (if available)
                 feedback_section = ""
                 if ctx.get("last_feedback"):
                     feedback_section = f'\n<feedback>\n{ctx["last_feedback"]}\n</feedback>\n'
                 base_user_content = f'Please continue to improve the scene based on the original request: "{ctx["prompt"]}"{feedback_section}\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
             
             messages = []
-            # 添加当前轮次的用户消息
+            # Add current turn's user message
             current_user_message = f'<image>{base_user_content}'
             
-            # 使用智能截断：基于 token 数量而非固定轮次
+            # Use smart truncation: based on token count rather than fixed turns
             conv_history = smart_truncate_conversation_history(
                 conversation_history=ctx["conversation_history"],
                 current_user_message=current_user_message,
@@ -2506,10 +2506,10 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 images=[ctx["current_image_path"]]
             ))
         
-        # 并行执行推理（分批处理避免OOM）
+        # Execute inference in parallel (batch processing to avoid OOM)
         print(f"Executing parallel inference for {len(infer_requests)} prompts (batch size: {max_batch_size})...")
         try:
-            # 分批推理
+            # Batch inference
             all_responses = []
             for batch_start in range(0, len(infer_requests), max_batch_size):
                 batch_end = min(batch_start + max_batch_size, len(infer_requests))
@@ -2519,26 +2519,26 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 all_responses.extend(batch_resp_list)
             resp_list = all_responses
             
-            # 处理每个响应
+            # Process each response
             newly_inactive = []
             for ctx, resp in zip(active_contexts, resp_list):
                 response = resp.choices[0].message.content
                 
-                # 保存响应
+                # Save response
                 with open(ctx["output_dir"] / f"response_iter_{iteration + 1}.txt", 'w', encoding='utf-8') as f:
                     f.write(response)
                 
-                # 更新对话历史
+                # Update conversation history
                 ctx["conversation_history"].append((
                     f'<image>{base_user_content}',
                     response
                 ))
                 
-                # 提取tool_calls
+                # Extract tool_calls
                 tool_calls = extract_tool_calls_from_response(response)
                 
                 if tool_calls is not None:
-                    # 检查terminate工具
+                    # Check for terminate tool
                     has_terminate = any(
                         isinstance(tc, dict) and tc.get('name') == 'terminate' 
                         for tc in tool_calls
@@ -2549,13 +2549,13 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         ctx["status"] = "completed"
                         newly_inactive.append(ctx)
                         
-                        # 保存最终场景
+                        # Save final scene
                         scene_file_path = ctx["output_dir"] / f"scene_iter_{iteration + 1}_final.json"
                         with open(scene_file_path, 'w', encoding='utf-8') as f:
                             json.dump(ctx["current_scene"], f, indent=2, ensure_ascii=False)
                         continue
                     
-                    # 应用工具调用
+                    # Apply tool calls
                     final_scene = apply_tool_calls_to_scene(ctx["current_scene"], tool_calls)
                 else:
                     final_scene = extract_final_scene_from_response(response)
@@ -2567,12 +2567,12 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                     newly_inactive.append(ctx)
                     continue
                 
-                # 检索资产
+                # Retrieve assets
                 final_scene = check_and_retrieve_assets(final_scene, asset_retrieval_module,
                                                         asset_source=asset_source,
                                                         objaverse_retriever=objaverse_retriever)
                 
-                # 应用物理优化（碰撞/出界修复）
+                # Apply physics optimization (collision/out-of-bounds fix)
                 physics_deleted_feedback = ""
                 if enable_physics_optimization:
                     print(f"✓ Prompt {ctx['idx']}: Applying physics optimization...")
@@ -2582,14 +2582,14 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         max_steps=physics_opt_steps
                     )
                 
-                # 保存场景
+                # Save scene
                 scene_file_path = ctx["output_dir"] / f"scene_iter_{iteration + 1}.json"
                 with open(scene_file_path, 'w', encoding='utf-8') as f:
                     json.dump(final_scene, f, indent=2, ensure_ascii=False)
                 
                 ctx["all_scenes"].append(final_scene)
                 
-                # 渲染场景
+                # Render scene
                 ctx["current_image_path"] = render_scene_to_image(
                     final_scene, 
                     ctx["output_dir"], 
@@ -2598,22 +2598,22 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 )
                 ctx["all_image_paths"].append(ctx["current_image_path"])
                 
-                # 更新当前场景
+                # Update current scene
                 ctx["current_scene"] = final_scene
                 
-                # ===== 生成反馈用于下一轮 =====
-                # 只在非最后一轮生成反馈
+                # ===== Generate feedback for next round =====
+                # Only generate feedback on non-last rounds
                 if iteration < num_iterations - 1:
                     feedback_parts = []
                     
-                    # 0. 物理优化删除物品反馈（优先添加）
+                    # 0. Physics optimization deleted objects feedback (add first)
                     if physics_deleted_feedback:
                         feedback_parts.append(physics_deleted_feedback)
                     
-                    # 1. 物理反馈（来自trimesh）
+                    # 1. Physics feedback (from trimesh)
                     if enable_physics_feedback and trimesh_metrics_instance is not None:
                         try:
-                            # 使用grouped格式进行物理评估
+                            # Use grouped format for physics evaluation
                             scene_for_eval = convert_flat_to_grouped(final_scene) if 'objects' in final_scene else final_scene
                             trimesh_metrics = trimesh_metrics_instance.evaluate_scene(scene_for_eval, format_type='ours')
                             physics_feedback = generate_physics_feedback(trimesh_metrics, top_k=3)
@@ -2622,7 +2622,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         except Exception as e:
                             print(f"⚠ Prompt {ctx['idx']}: Physics feedback failed - {e}")
                     
-                    # 2. VLM布局反馈（来自Azure GPT-5.1）
+                    # 2. VLM layout feedback (from Azure GPT-5.1)
                     if enable_vlm_feedback and azure_client_for_feedback is not None and ctx["current_image_path"] and Path(ctx["current_image_path"]).exists():
                         try:
                             layout_feedback = generate_vlm_layout_feedback_azure(
@@ -2635,7 +2635,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                         except Exception as e:
                             print(f"⚠ Prompt {ctx['idx']}: VLM feedback failed - {e}")
                     
-                    # 组合反馈
+                    # Combine feedback
                     if feedback_parts:
                         ctx["last_feedback"] = " ".join(feedback_parts)
                     else:
@@ -2643,7 +2643,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 
                 print(f"✓ Prompt {ctx['idx']}: Iteration {iteration + 1} completed")
             
-            # 移除不再活跃的contexts
+            # Remove no longer active contexts
             for ctx in newly_inactive:
                 active_contexts.remove(ctx)
                 
@@ -2657,12 +2657,12 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 ctx["error"] = f"Parallel inference error at iteration {iteration + 1}: {str(e)}"
             break
     
-    # 标记完成所有迭代的prompts
+    # Mark prompts that completed all iterations
     for ctx in active_contexts:
         if ctx["status"] == "initialized":
             ctx["status"] = "completed"
     
-    # 生成迭代汇总图并立即收集final_scene和渲染图
+    # Generate iteration summary images and immediately collect final_scene and renders
     print(f"\n{'='*60}")
     print("GENERATING SUMMARIES AND COLLECTING FINAL OUTPUTS")
     print(f"{'='*60}\n")
@@ -2679,9 +2679,9 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
             except Exception as e:
                 print(f"✗ Prompt {ctx['idx']}: Failed to create summary - {e}")
             
-            # 立即收集final_scene和渲染图
+            # Immediately collect final_scene and renders
             try:
-                # 收集最终场景JSON
+                # Collect final scene JSON
                 scene_files = sorted(ctx["output_dir"].glob("scene_iter_*.json"), key=lambda p: int(re.search(r'iter_(\d+)', p.name).group(1)))
                 if scene_files:
                     final_scene_file = scene_files[-1]
@@ -2690,7 +2690,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                     collected_scenes_count += 1
                     print(f"✓ Prompt {ctx['idx']}: Collected final scene")
                 
-                # 收集最终渲染图
+                # Collect final render images
                 render_files = sorted(ctx["output_dir"].glob("merged_iter_*.png"), key=lambda p: int(re.search(r'iter_(\d+)', p.name).group(1)))
                 if render_files:
                     final_render_file = render_files[-1]
@@ -2701,7 +2701,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
             except Exception as collect_e:
                 print(f"⚠ Prompt {ctx['idx']}: Failed to collect files - {collect_e}")
     
-    # 保存对话历史
+    # Save conversation history
     for ctx in prompt_contexts:
         if ctx["conversation_history"]:
             with open(ctx["output_dir"] / "conversation_history.txt", 'w', encoding='utf-8') as f:
@@ -2711,7 +2711,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                     f.write(f"Assistant: {assistant_msg}\n\n")
                     f.write("-" * 80 + "\n\n")
     
-    # 收集结果
+    # Collect results
     all_results = []
     for ctx in prompt_contexts:
         if ctx["status"] in ["completed", "initialized"]:
@@ -2728,7 +2728,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
                 "error": ctx.get("error", "Unknown error")
             })
     
-    # 汇总收集结果
+    # Summarize collection results
     print(f"\n{'='*60}")
     print("COLLECTION SUMMARY")
     print(f"{'='*60}")
@@ -2738,7 +2738,7 @@ def batch_iterative_scene_generation_parallel(prompts: List[str], engine, reques
     print(f"Final scenes directory: {final_scenes_dir}")
     print(f"Final renders directory: {final_renders_dir}")
     
-    # 保存汇总
+    # Save summary
     summary_file = output_base_path / "batch_summary.json"
     summary_data = {
         "total_prompts": len(prompts),
@@ -2785,33 +2785,33 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                                      physics_opt_steps: int = 5,
                                      models_path: str = None,
                                      original_indices: List[int] = None):
-    """批量迭代场景生成 - 对多个prompts分别执行完整的迭代场景生成
+    """Batch iterative scene generation - execute full iterative scene generation for multiple prompts
     
     Args:
-        prompts: prompts列表
-        engine: 推理引擎
-        request_config: 请求配置
-        initial_scene_path: 初始场景JSON文件路径（如果不生成空房间）
-        asset_retrieval_module: 资产检索模块
-        num_iterations: 每个prompt的迭代次数
-        output_base_dir: 输出基础目录
-        generate_room: 是否生成空房间
-        use_model_for_creation: 是否使用模型生成初始场景
-        use_gpt_with_objects: 是否使用GPT生成带物体的完整场景
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse 资产检索器实例
-        enable_visualization: 是否启用3D可视化辅助线
-        enable_physics_feedback: 是否启用物理反馈注入
-        enable_vlm_feedback: 是否启用VLM布局反馈注入
-        enable_physics_optimization: 是否启用物理优化（碰撞/出界修复）
-        physics_opt_steps: 物理优化最大步数
-        models_path: 3D模型路径
-        original_indices: 原始prompt索引列表(1-indexed)，用于跳过已完成场景时保持索引一致
+        prompts: List of prompts
+        engine: Inference engine
+        request_config: Request configuration
+        initial_scene_path: Initial scene JSON file path (if not generating empty room)
+        asset_retrieval_module: Asset retrieval module
+        num_iterations: Number of iterations per prompt
+        output_base_dir: Base output directory
+        generate_room: Whether to generate empty room
+        use_model_for_creation: Whether to use model to generate initial scene
+        use_gpt_with_objects: Whether to use GPT to generate complete scene with objects
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retriever instance
+        enable_visualization: Whether to enable 3D visualization guide lines
+        enable_physics_feedback: Whether to enable physics feedback injection
+        enable_vlm_feedback: Whether to enable VLM layout feedback injection
+        enable_physics_optimization: Whether to enable physics optimization (collision/out-of-bounds fix)
+        physics_opt_steps: Maximum physics optimization steps
+        models_path: Path to 3D models
+        original_indices: Original prompt index list (1-indexed), for maintaining index consistency when skipping completed scenes
     
     Returns:
-        所有场景的结果列表
+        List of results for all scenes
     """
-    # 如果没有提供原始索引，使用默认的1到N
+    # If no original indices provided, use default 1 to N
     if original_indices is None:
         original_indices = list(range(1, len(prompts) + 1))
     
@@ -2820,7 +2820,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
     print(f"Processing {len(prompts)} prompts with {num_iterations} iterations each")
     print(f"{'='*50}\n")
     
-    # 创建收集文件夹（提前创建，每完成一个就立即收集）
+    # Create collection folder (create in advance, collect immediately upon completion)
     output_base_path = Path(output_base_dir)
     final_scenes_dir = output_base_path / "final_scenes_collection"
     final_renders_dir = output_base_path / "final_renders_collection"
@@ -2835,7 +2835,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
     collected_renders_count = 0
     
     for list_idx, prompt in enumerate(prompts):
-        # 使用原始索引而不是列表索引
+        # Use original index instead of list index
         idx = original_indices[list_idx]
         
         # Parse prompt for embedded scene
@@ -2846,16 +2846,16 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
         print(f"# Prompt: {prompt_text}")
         print(f"{'#'*60}\n")
         
-        # 为每个prompt创建独立的输出目录
+        # Create independent output directory for each prompt
         prompt_output_dir = Path(output_base_dir) / f"prompt_{idx}"
         prompt_output_dir.mkdir(parents=True, exist_ok=True)
         
-        # 保存当前prompt到文件
+        # Save current prompt to file
         with open(prompt_output_dir / "prompt.txt", 'w', encoding='utf-8') as f:
             f.write(prompt_text)
         
         try:
-            # 确定初始场景路径
+            # Determine initial scene path
             scene_path = initial_scene_path
             initial_conversation = None
             
@@ -2868,7 +2868,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                 scene_path = str(embedded_scene_path)
                 print(f"✓ Embedded scene saved: {scene_path}")
             
-            # 如果使用GPT生成带物体的完整场景
+            # If using GPT to generate complete scene with objects
             elif use_gpt_with_objects:
                 print(f"Generating complete scene with GPT for prompt {idx}...")
                 generated_scene_path = prompt_output_dir / "generated_scene_with_objects.json"
@@ -2886,7 +2886,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                     print(f"✓ Complete scene with objects generated: {scene_path}")
                 else:
                     print(f"✗ Failed to generate scene with objects, falling back to empty room")
-                    # 回退到生成空房间
+                    # Fall back to generating empty room
                     generated_room_path = prompt_output_dir / "generated_empty_room.json"
                     room_data = generate_empty_room(prompt_text, str(generated_room_path))
                     if room_data is not None:
@@ -2902,7 +2902,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                             })
                             continue
                 
-            # 如果需要生成空房间
+            # If empty room generation is needed
             elif generate_room:
                 print(f"Generating empty room for prompt {idx}...")
                 generated_room_path = prompt_output_dir / "generated_empty_room.json"
@@ -2931,7 +2931,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                         })
                         continue
             
-            # 检查场景文件是否存在
+            # Check if scene file exists
             if not scene_path or not Path(scene_path).exists():
                 print(f"Error: Scene file not found: {scene_path}")
                 all_results.append({
@@ -2941,7 +2941,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                 })
                 continue
             
-            # 执行迭代场景生成
+            # Execute iterative scene generation
             scenes = iterative_scene_generation(
                 initial_scene_path=scene_path,
                 user_prompt=prompt_text,
@@ -2972,9 +2972,9 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
             print(f"  Generated {len(scenes)} scenes")
             print(f"  Output: {prompt_output_dir}")
             
-            # 立即收集final_scene和渲染图
+            # Immediately collect final_scene and renders
             try:
-                # 收集最终场景JSON
+                # Collect final scene JSON
                 scene_files = sorted(prompt_output_dir.glob("scene_iter_*.json"), key=lambda p: int(re.search(r'iter_(\d+)', p.name).group(1)))
                 if scene_files:
                     final_scene_file = scene_files[-1]
@@ -2983,7 +2983,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                     collected_scenes_count += 1
                     print(f"  ✓ Collected final scene: {destination_scene.name}")
                 
-                # 收集最终渲染图
+                # Collect final render images
                 render_files = sorted(prompt_output_dir.glob("merged_iter_*.png"), key=lambda p: int(re.search(r'iter_(\d+)', p.name).group(1)))
                 if render_files:
                     final_render_file = render_files[-1]
@@ -3005,7 +3005,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
                 "error": str(e)
             })
     
-    # 汇总收集结果
+    # Summarize collection results
     print(f"\n{'='*60}")
     print("COLLECTION SUMMARY")
     print(f"{'='*60}")
@@ -3015,7 +3015,7 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
     print(f"Final scenes directory: {final_scenes_dir}")
     print(f"Final renders directory: {final_renders_dir}")
     
-    # 保存批量处理的汇总结果
+    # Save batch processing summary results
     print(f"\n{'='*60}")
     print("BATCH PROCESSING SUMMARY")
     print(f"{'='*60}")
@@ -3048,23 +3048,23 @@ def batch_iterative_scene_generation(prompts: List[str], engine, request_config,
     return all_results
 
 def load_prompts_from_file(file_path: str, max_prompts: int = None) -> List[str]:
-    """从txt文件读取prompts
+    """Read prompts from txt file
     
     Args:
-        file_path: txt文件路径,每行一个prompt
-        max_prompts: 最多读取的prompt数量，None表示读取全部
+        file_path: Path to txt file, one prompt per line
+        max_prompts: Maximum number of prompts to read, None for all
     
     Returns:
-        prompts列表
+        List of prompts
     """
     prompts = []
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 line = line.strip()
-                if line:  # 跳过空行
+                if line:  # Skip empty lines
                     prompts.append(line)
-                    # 如果达到限制数量，停止读取
+                    # If limit reached, stop reading
                     if max_prompts is not None and len(prompts) >= max_prompts:
                         break
         
@@ -3082,23 +3082,23 @@ def load_prompts_from_file(file_path: str, max_prompts: int = None) -> List[str]
 
 
 def find_existing_scenes(output_base_dir: str, total_prompts: int) -> set:
-    """检测已完成的场景，返回已完成的prompt索引集合
+    """Detect completed scenes, return set of completed prompt indices
     
     Args:
-        output_base_dir: 输出基础目录
-        total_prompts: 总prompt数量
+        output_base_dir: Base output directory
+        total_prompts: Total number of prompts
         
     Returns:
-        已完成的prompt索引集合 (1-indexed)
+        Set of completed prompt indices (1-indexed)
     """
     existing_indices = set()
     output_path = Path(output_base_dir)
     
-    # 检查 final_scenes_collection 目录中的已完成场景
+    # Check completed scenes in final_scenes_collection directory
     final_scenes_dir = output_path / "final_scenes_collection"
     if final_scenes_dir.exists():
         for scene_file in final_scenes_dir.glob("prompt_*_final_scene.json"):
-            # 从文件名提取索引，格式为 prompt_{idx}_final_scene.json
+            # Extract index from filename, format: prompt_{idx}_final_scene.json
             try:
                 filename = scene_file.stem  # prompt_1_final_scene
                 parts = filename.split('_')
@@ -3109,21 +3109,21 @@ def find_existing_scenes(output_base_dir: str, total_prompts: int) -> set:
             except (ValueError, IndexError):
                 continue
     
-    # 也检查各个 prompt_X 目录中是否有生成的场景文件
+    # Also check each prompt_X directory for generated scene files
     for idx in range(1, total_prompts + 1):
         if idx in existing_indices:
             continue
         prompt_dir = output_path / f"prompt_{idx}"
         if prompt_dir.exists():
-            # 检查是否有最终迭代的场景文件
+            # Check for final iteration scene files
             scene_files = list(prompt_dir.glob("scene_iter_*.json"))
             if scene_files:
-                # 找到最大迭代号
+                # Find maximum iteration number
                 max_iter = max(
                     int(f.stem.replace("scene_iter_", "")) 
                     for f in scene_files
                 )
-                # 如果有较高迭代号的场景，认为已完成
+                # If there are scenes with high iteration numbers, consider it completed
                 if max_iter >= 1:
                     existing_indices.add(idx)
     
@@ -3131,15 +3131,15 @@ def find_existing_scenes(output_base_dir: str, total_prompts: int) -> set:
 
 
 def filter_prompts_by_existing(prompts: List[str], output_base_dir: str, skip_existing: bool = False) -> tuple:
-    """根据已完成的场景过滤prompts
+    """Filter prompts based on completed scenes
     
     Args:
-        prompts: 原始prompts列表
-        output_base_dir: 输出基础目录
-        skip_existing: 是否跳过已完成的场景
+        prompts: Original list of prompts
+        output_base_dir: Base output directory
+        skip_existing: Whether to skip completed scenes
         
     Returns:
-        tuple: (过滤后的prompts列表, 过滤后的prompt索引列表(1-indexed), 跳过的prompt数量)
+        tuple: (filtered prompts list, filtered prompt index list (1-indexed), number of skipped prompts)
     """
     if not skip_existing:
         return prompts, list(range(1, len(prompts) + 1)), 0
@@ -3176,12 +3176,12 @@ def filter_prompts_by_existing(prompts: List[str], output_base_dir: str, skip_ex
     return filtered_prompts, filtered_indices, skipped_count
 
 
-# 初始化资产检索模块（如果可用）
+# Initialize asset retrieval module (if available)
 asset_retrieval_module = None
 try:
-    # 使用 sample.py 中的高级资产检索模块
+    # Use advanced asset retrieval module from sample.py
     from utils.sample import AssetRetrievalModule
-    # 初始化参数与 sample.py 中的测试代码保持一致
+    # Initialization parameters match the test code in sample.py
     asset_retrieval_module = AssetRetrievalModule(
         lambd=0.5, 
         sigma=0.05, 
@@ -3197,7 +3197,7 @@ except Exception as e:
     print(f"Could not initialize advanced asset retrieval module: {e}")
     print("Will use fallback asset retrieval logic")
 
-# 添加PIL导入用于图片处理
+# Add PIL import for image processing
 try:
     from PIL import Image
     print("PIL imported successfully")
@@ -3205,7 +3205,7 @@ except ImportError:
     print("Warning: PIL not available, rendering will be limited")
 
 def main():
-    """主函数"""
+    """Main function"""
     import argparse
     
     parser = argparse.ArgumentParser(description='Iterative Scene Generation')
@@ -3219,52 +3219,52 @@ def main():
     parser.add_argument('--use-model-for-creation', action='store_true', default=True,  help='Use fine-tuned model instead of GPT-4o to generate initial scene')
     parser.add_argument('--use-gpt-with-objects', action='store_true', default=False, help='Use GPT to generate complete scene with furniture objects (includes asset retrieval)')
     parser.add_argument('--room-prompt', default=None, help='Prompt for generating empty room (overrides --prompt if provided)')
-    # 添加批量推理参数
+    # Add batch inference arguments
     parser.add_argument('--batch-mode', action='store_true', help='Run in batch mode - process multiple prompts from file')
     parser.add_argument('--prompts-file', default="/path/to/datasets/llmscene/sft/test_prompt_3dfront_v3.txt", help='Path to txt file containing prompts (one per line)')
     parser.add_argument('--max-prompts', type=int, default=None, help='Maximum number of prompts to process (default: process all)')
     parser.add_argument('--parallel', action='store_true', help='Enable parallel processing - process all prompts simultaneously at each iteration (faster)')
-    # 资产来源选择参数
+    # Asset source selection arguments
     parser.add_argument('--asset-source', choices=['3d-future', 'objaverse', 'auto'], default='auto',
                        help='Asset source for retrieval: 3d-future (default), objaverse, or auto (hybrid)')
-    # 3D可视化参数
+    # 3D visualization arguments
     parser.add_argument('--enable-viz', action='store_true', 
                        help='Enable 3D visualization with auxiliary lines (bbox, arrows, coordinate grid)')
     parser.add_argument('--disable-viz', action='store_true',
                        help='Explicitly disable 3D visualization')
-    # 模型路径参数
+    # Model path arguments
     parser.add_argument('--model', type=str, default="/path/to/SceneReVis/ckpt/rl_ood_B200_v6_e3_s80",
                        help='Path to the model checkpoint directory')
     parser.add_argument('--lora-checkpoint', type=str, default=None,
                        help='Path to the LoRA checkpoint directory (optional)')
-    # 多卡并行参数
+    # Multi-GPU parallel arguments
     parser.add_argument('--tensor-parallel', type=int, default=1,
                        help='Number of GPUs for tensor parallelism (default: 1, use all available GPUs with -1)')
-    # 对话历史限制参数
+    # Conversation history limit arguments
     parser.add_argument('--max-history-turns', type=int, default=8,
                        help='Maximum number of conversation history turns to keep (default: 4)')
-    # 批处理大小限制参数
+    # Batch size limit arguments
     parser.add_argument('--max-batch-size', type=int, default=4,
                        help='Maximum batch size for parallel inference to prevent OOM (default: 4)')
-    # 反馈注入控制参数
+    # Feedback injection control arguments
     parser.add_argument('--enable-physics-feedback', action='store_true', default=False,
                        help='Enable physics feedback injection into user prompts (default: disabled)')
     parser.add_argument('--enable-vlm-feedback', action='store_true', default=False,
                        help='Enable VLM (GPT-5.1) layout feedback injection into user prompts (default: disabled)')
-    # 物理优化控制参数（碰撞检测和出界修复）
+    # Physics optimization control arguments (collision detection and out-of-bounds fix)
     parser.add_argument('--enable-physics-optimization', action='store_true', default=False,
                        help='Enable physics optimization after each iteration (resolve collisions and out-of-bounds)')
     parser.add_argument('--physics-opt-steps', type=int, default=5,
                        help='Maximum steps for physics optimization (default: 5)')
     parser.add_argument('--models-path', type=str, default=None,
                        help='Path to 3D models directory for physics optimization')
-    # 跳过已完成场景参数
+    # Skip completed scenes arguments
     parser.add_argument('--skip-existing', action='store_true', default=False,
                        help='Skip prompts that already have generated final scenes in output directory')
     
     args = parser.parse_args()
 
-    # 初始化 Objaverse 检索器（如果需要）
+    # Initialize Objaverse retriever (if needed)
     objaverse_retriever = None
     if args.asset_source in ['objaverse', 'auto']:
         if ObjaverseRetriever is not None:
@@ -3286,7 +3286,7 @@ def main():
                 print("  Falling back to 3d-future")
                 args.asset_source = '3d-future'
 
-    # 确定是否启用可视化
+    # Determine whether to enable visualization
     enable_visualization = args.enable_viz and not args.disable_viz
     if enable_visualization and render_with_visualization is None:
         print("Warning: 3D visualization requested but module not available")
@@ -3298,11 +3298,11 @@ def main():
     print(f"VLM layout feedback: {'enabled' if args.enable_vlm_feedback else 'disabled'}")
     print(f"Skip existing: {'enabled' if args.skip_existing else 'disabled'}")
 
-    # 模型配置
+    # Model configuration
     global engine, request_config
     model = args.model
     lora_checkpoint = args.lora_checkpoint
-    template_type = None  # None: 使用对应模型默认的template_type
+    template_type = None  # None: use the corresponding model's default template_type
     
     print(f"Model path: {model}")
     if lora_checkpoint:
@@ -3435,13 +3435,13 @@ Format template:
 * `reason` (string)"""
 
 
-    # 加载模型和对话模板 - 使用vLLM引擎
-    infer_backend = 'vllm'  # 使用vLLM后端进行推理
+    # Load model and conversation template - using vLLM engine
+    infer_backend = 'vllm'  # Use vLLM backend for inference
 
-    # 确定tensor parallel大小
+    # Determine tensor parallel size
     import torch
     if args.tensor_parallel == -1:
-        # 自动检测可用GPU数量
+        # Auto-detect available GPU count
         tensor_parallel_size = torch.cuda.device_count()
         print(f"Auto-detected {tensor_parallel_size} GPUs for tensor parallelism")
     else:
@@ -3452,8 +3452,8 @@ Format template:
     print(f"Max batch size: {args.max_batch_size}")
 
     if infer_backend == 'vllm':
-        # 设置seed确保可复现性，添加tensor_parallel_size支持多卡
-        # 先获取tokenizer和template以设置default_system
+        # Set seed for reproducibility, add tensor_parallel_size for multi-GPU support
+        # First get tokenizer and template to set default_system
         from swift.llm import get_model_tokenizer, get_template
         _, tokenizer = get_model_tokenizer(model, model_type="qwen2_5_vl", load_model=False)
         template = get_template("qwen2_5_vl", tokenizer, default_system=default_system)
@@ -3468,16 +3468,16 @@ Format template:
             template=template
         )
     else:
-        # 如果需要使用其他后端,可以在这里添加
+        # If other backends are needed, they can be added here
         model, tokenizer = get_model_tokenizer(model, model_type="qwen2_5_vl")
         template_type = template_type or model.model_meta.template
         template = get_template(template_type, tokenizer, default_system=default_system)
         engine = PtEngine.from_model_template(model, template, max_batch_size=64)
 
-    # temperature=0 + seed 确保确定性输出
+    # temperature=0 + seed ensures deterministic output
     request_config = RequestConfig(max_tokens=16384, temperature=0, seed=42)
     
-    # 批量模式 - 对多个prompts分别执行完整的迭代场景生成
+    # Batch mode - execute full iterative scene generation for multiple prompts
     if args.batch_mode:
         mode_name = "PARALLEL BATCH MODE" if args.parallel else "SEQUENTIAL BATCH MODE"
         print("="*60)
@@ -3488,14 +3488,14 @@ Format template:
             print("Error: --prompts-file is required for batch mode")
             return
         
-        # 从文件加载prompts
+        # Load prompts from file
         prompts = load_prompts_from_file(args.prompts_file, max_prompts=args.max_prompts)
         
         if not prompts:
             print("Error: No prompts loaded from file")
             return
         
-        # 过滤已完成的场景
+        # Filter completed scenes
         filtered_prompts, original_indices, skipped_count = filter_prompts_by_existing(
             prompts, args.output, skip_existing=args.skip_existing
         )
@@ -3526,9 +3526,9 @@ Format template:
             print("\nWarning: Test mode is not supported in batch mode")
             print("Running with actual model inference...")
         
-        # 根据是否并行选择不同的处理函数
+        # Choose different processing function based on parallel flag
         if args.parallel:
-            # 并行处理 - 在每个迭代步骤中同时处理所有prompt
+            # Parallel processing - process all prompts simultaneously at each iteration step
             results = batch_iterative_scene_generation_parallel(
                 prompts=filtered_prompts,
                 engine=engine,
@@ -3553,7 +3553,7 @@ Format template:
                 original_indices=original_indices
             )
         else:
-            # 串行处理 - 一个prompt完成后再处理下一个
+            # Serial processing - process one prompt at a time
             results = batch_iterative_scene_generation(
                 prompts=filtered_prompts,
                 engine=engine,
@@ -3584,7 +3584,7 @@ Format template:
         
         return
     
-    # 单个prompt的迭代场景生成模式（原有功能）
+    # Single prompt iterative scene generation mode (original functionality)
     print("Starting iterative scene generation system...")
     
     print(f"Configuration:")
@@ -3599,12 +3599,12 @@ Format template:
     if args.room_prompt:
         print(f"  Room prompt: {args.room_prompt}")
     
-    # 如果需要生成场景，先生成场景结构
+    # If scene generation is needed, generate scene structure first
     initial_scene_path = args.scene
-    initial_conversation = None  # 用于存储初始场景生成的对话
+    initial_conversation = None  # For storing initial scene generation conversation
     
     if args.use_gpt_with_objects:
-        # 使用GPT生成带物体的完整场景
+        # Use GPT to generate complete scene with objects
         print("\n" + "="*50)
         print("GENERATING COMPLETE SCENE WITH GPT")
         print("="*50)
@@ -3630,7 +3630,7 @@ Format template:
             initial_scene_path = str(generated_scene_path)
         else:
             print("✗ Failed to generate complete scene, falling back to empty room")
-            # 回退到生成空房间
+            # Fall back to generating empty room
             generated_room_path = output_dir / "generated_empty_room.json"
             room_data = generate_empty_room(room_prompt, str(generated_room_path))
             if room_data is not None:
@@ -3644,16 +3644,16 @@ Format template:
         print("GENERATING EMPTY ROOM STRUCTURE")
         print("="*50)
         
-        # 使用room_prompt或默认的prompt
+        # Use room_prompt or default prompt
         room_prompt = args.room_prompt or args.prompt
         print(f"Room generation prompt: {room_prompt}")
         
-        # 生成空房间并保存
+        # Generate empty room and save
         output_dir = Path(args.output)
         output_dir.mkdir(parents=True, exist_ok=True)
         generated_room_path = output_dir / "generated_empty_room.json"
         
-        # 根据use_model_for_creation选项决定使用哪种方法
+        # Choose method based on use_model_for_creation option
         if args.use_model_for_creation:
             print("Using fine-tuned model to generate initial scene...")
             room_data, initial_conversation = generate_empty_room_with_model(
@@ -3668,26 +3668,26 @@ Format template:
         
         if room_data is not None:
             print(f"✓ Empty room generated successfully: {generated_room_path}")
-            # 使用生成的房间作为初始场景
+            # Use generated room as initial scene
             initial_scene_path = str(generated_room_path)
         else:
             print("✗ Failed to generate empty room, using original scene file")
             print(f"Fallback to: {args.scene}")
     
-    # 检查初始场景文件是否存在
+    # Check if initial scene file exists
     if not Path(initial_scene_path).exists():
         print(f"Error: Initial scene file not found: {initial_scene_path}")
         return
     
     if args.test_mode:
         print("Running in test mode (no model inference)...")
-        # 使用测试函数
+        # Use test function
         test_iterative_generation(initial_scene_path, args.prompt, args.iterations, args.output, 
                                   asset_retrieval_module, asset_source=args.asset_source,
                                   objaverse_retriever=objaverse_retriever, 
                                   enable_visualization=enable_visualization)
     else:
-        # 执行实际的迭代生成
+        # Execute actual iterative generation
         try:
             all_scenes = iterative_scene_generation(
                 initial_scene_path=initial_scene_path,
@@ -3720,18 +3720,18 @@ Format template:
 def test_iterative_generation(initial_scene_path, user_prompt, num_iterations, output_dir, 
                               asset_retrieval_module=None, asset_source='3d-future',
                               objaverse_retriever=None, enable_visualization=False):
-    """测试模式的迭代生成（不使用实际模型）
+    """Test mode iterative generation (without using actual model)
     
     Args:
-        asset_source: 资产来源 ('3d-future', 'objaverse', 'auto')
-        objaverse_retriever: Objaverse 资产检索器实例
-        enable_visualization: 是否启用3D可视化辅助线
+        asset_source: Asset source ('3d-future', 'objaverse', 'auto')
+        objaverse_retriever: Objaverse asset retriever instance
+        enable_visualization: Whether to enable 3D visualization guide lines
     """
     
     def mock_model_response(iteration, current_scene, conversation_history):
-        """模拟模型响应，考虑对话历史避免重复"""
+        """Simulate model response, considering conversation history to avoid repetition"""
         
-        # 在第3次迭代时返回terminate工具调用，测试提前停止功能
+        # Return terminate tool call on 3rd iteration, testing early stop functionality
         if iteration == 3:
             tool_calls = [
                 {
@@ -3761,7 +3761,7 @@ The scene now provides a complete and functional living space that meets the use
             
             return response
         
-        # 根据历史对话调整响应
+        # Adjust response based on conversation history
         if iteration == 1:
             furniture_type = "modern sofa"
             action_desc = "adding a comfortable seating area"
@@ -3775,7 +3775,7 @@ The scene now provides a complete and functional living space that meets the use
             furniture_type = f"decorative item {iteration}"
             action_desc = f"adding finishing touches with decorative elements"
         
-        # 模拟工具调用
+        # Simulate tool calls
         tool_calls = [
             {
                 "id": f"tool_{iteration}",
@@ -3808,14 +3808,14 @@ This iteration builds upon our previous improvements to create a more complete l
         
         return response
     
-    # 读取初始场景
+    # Read initial scene
     with open(initial_scene_path, 'r', encoding='utf-8') as f:
         current_scene = json.load(f)
     
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # 渲染初始场景作为第一张图片
+    # Render initial scene as first image
     print("Rendering initial scene...")
     initial_image_path = render_scene_to_image(current_scene, output_path, 0, enable_visualization=enable_visualization)
     print(f"Initial scene rendered to: {initial_image_path}")
@@ -3824,7 +3824,7 @@ This iteration builds upon our previous improvements to create a more complete l
     
     all_scenes = []
     
-    # 保存完整的对话历史，包含每轮的用户请求和模型响应
+    # Save complete conversation history including user requests and model responses for each turn
     conversation_history = []
     
     for iteration in range(num_iterations):
@@ -3832,39 +3832,39 @@ This iteration builds upon our previous improvements to create a more complete l
         print(f"TEST ITERATION {iteration + 1}/{num_iterations}")
         print(f"{'='*50}")
         
-        # 构建当前迭代的用户内容
+        # Build current iteration's user content
         current_scene_json = json.dumps(current_scene, indent=2)
         
-        # 构建基础用户内容
+        # Build base user content
         if iteration == 0:
-            # 第一轮：初始请求
+            # First round: initial request
             base_user_content = f'{user_prompt}\n\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
         else:
-            # 后续轮次：继续优化场景
+            # Subsequent turns: continue optimizing scene
             base_user_content = f'Please continue to improve the scene based on the original request: "{user_prompt}"\n\n<current_scene>\n```json\n{current_scene_json}\n```\n</current_scene>'
         
         current_user_message = f'<image>{base_user_content}'
         
         print(f"Current scene has {len(current_scene.get('groups', current_scene.get('objects', [])))} objects/groups")
         
-        # 模拟模型响应（考虑对话历史）
+        # Simulate model response (considering conversation history)
         response = mock_model_response(iteration + 1, current_scene, conversation_history)
         
-        # 保存响应
+        # Save response
         with open(output_path / f"response_iter_{iteration + 1}.txt", 'w', encoding='utf-8') as f:
             f.write(response)
         
-        # 将当前轮次的对话添加到历史中
+        # Add current turn's conversation to history
         conversation_history.append((current_user_message, response))
         
-        # 首先尝试提取 tool_calls
+        # First try to extract tool_calls
         tool_calls = extract_tool_calls_from_response(response)
         final_scene = None
         
         if tool_calls is not None:
             print(f"Extracted {len(tool_calls)} tool calls")
             
-            # 检查是否有terminate工具调用
+            # Check for terminate tool call
             has_terminate = False
             for tool_call in tool_calls:
                 if isinstance(tool_call, dict) and tool_call.get('name') == 'terminate':
@@ -3873,21 +3873,21 @@ This iteration builds upon our previous improvements to create a more complete l
                     print(f"🛑 Terminate tool detected: {terminate_reason}")
                     break
             
-            # 如果发现terminate工具，停止迭代
+            # If terminate tool found, stop iterations
             if has_terminate:
                 print(f"Stopping test iterations early due to terminate tool call")
-                # 保存当前场景作为最终场景
+                # Save current scene as final scene
                 scene_file_path = output_path / f"scene_iter_{iteration + 1}_final.json"
                 with open(scene_file_path, 'w', encoding='utf-8') as f:
                     json.dump(current_scene, f, indent=2, ensure_ascii=False)
                 print(f"Final scene saved to: {scene_file_path}")
                 break
             
-            # 使用 scene_editor 应用工具调用来生成最终场景
+            # Use scene_editor to apply tool calls to generate final scene
             final_scene = apply_tool_calls_to_scene(current_scene, tool_calls)
             print("Applied tool calls to generate final scene")
         else:
-            # 如果没有找到 tool_calls，尝试提取 final_scene（作为备用）
+            # If no tool_calls found, try to extract final_scene (as fallback)
             print("No tool_calls found, trying to extract final_scene as fallback")
             final_scene = extract_final_scene_from_response(response)
         
@@ -3897,28 +3897,28 @@ This iteration builds upon our previous improvements to create a more complete l
         
         print(f"Extracted final_scene with {len(final_scene.get('groups', final_scene.get('objects', [])))} objects/groups")
         
-        # 检索需要的资产
+        # Retrieve required assets
         final_scene = check_and_retrieve_assets(final_scene, asset_retrieval_module,
                                                  asset_source=asset_source,
                                                  objaverse_retriever=objaverse_retriever)
         
-        # 保存当前场景
+        # Save current scene
         scene_file_path = output_path / f"scene_iter_{iteration + 1}.json"
         with open(scene_file_path, 'w', encoding='utf-8') as f:
             json.dump(final_scene, f, indent=2, ensure_ascii=False)
         
         all_scenes.append(final_scene)
         
-        # 渲染场景为图片
+        # Render scene as image
         image_path = render_scene_to_image(final_scene, output_path, iteration + 1, enable_visualization=enable_visualization)
         print(f"Rendered image: {image_path}")
         
-        # 更新当前场景为下一次迭代做准备
+        # Update current scene for next iteration
         current_scene = final_scene
         
         print(f"Iteration {iteration + 1} completed successfully")
     
-    # 保存完整的对话历史到文件
+    # Save complete conversation history to file
     if conversation_history:
         with open(output_path / "conversation_history.txt", 'w', encoding='utf-8') as f:
             for i, (user_msg, assistant_msg) in enumerate(conversation_history, 1):
@@ -3937,22 +3937,22 @@ This iteration builds upon our previous improvements to create a more complete l
     
     return all_scenes
 
-# 进一步修补 modelscope 内部的 import_utils 模块的 __getattr__，对 __addon_enabled__ 返回 False 避免触发远程导入
+# Further patch modelscope internal import_utils module's __getattr__, return False for __addon_enabled__ to avoid triggering remote imports
 try:
     import importlib
     import sys
     
-    # 修补 modelscope.utils.import_utils
+    # Patch modelscope.utils.import_utils
     imp_mod = importlib.import_module('modelscope.utils.import_utils')
     
-    # 保存原始的 __getattr__
+    # Save original __getattr__
     _original_getattr = getattr(imp_mod, '__getattr__', None)
     
     def _safe_import_utils_getattr(name):
-        # 对 Blender addon 相关的属性返回安全值
+        # Return safe values for Blender addon related attributes
         if name in ('__addon_enabled__', '__addon_dependencies__', 'bl_info', 'register', 'unregister'):
             return False
-        # 对其他属性，尝试返回 None 而不是抛出异常
+        # For other attributes, try to return None instead of raising exceptions
         if _original_getattr:
             try:
                 return _original_getattr(name)
@@ -3960,10 +3960,10 @@ try:
                 return None
         return None
     
-    # 将模块级的 __getattr__ 替换为安全实现
+    # Replace module-level __getattr__ with safe implementation
     imp_mod.__getattr__ = _safe_import_utils_getattr
     
-    # 同时修补 modelscope 主模块
+    # Also patch modelscope main module
     modelscope_mod = sys.modules.get('modelscope')
     if modelscope_mod:
         _original_modelscope_getattr = getattr(modelscope_mod, '__getattr__', None)

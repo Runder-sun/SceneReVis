@@ -77,14 +77,26 @@ requests
 # PyBind11: C++ bindings (required by some dependencies)
 pybind11
 
-# ===== Optional: CLIP for Asset Retrieval =====
-# If using 3D-FUTURE asset retrieval, CLIP is required
-# open-clip-torch>=2.0.0
-# ftfy
+# ===== CLIP & Retrieval =====
+# open-clip-torch: CLIP model for asset retrieval
+open-clip-torch>=2.0.0
 
-# ===== Optional: Objaverse Asset Retrieval =====
-# If using Objaverse asset retrieval
-# objaverse>=0.1.7
+# ftfy: Text cleanup for CLIP tokenizer
+ftfy
+
+# sentence-transformers: Sentence embeddings for asset retrieval
+sentence-transformers
+
+# ===== Compression & Serialization =====
+# compress_json: Compressed JSON I/O
+compress_json
+
+# compress_pickle: Compressed pickle I/O
+compress_pickle
+
+# ===== Physics =====
+# python-fcl: FCL collision checking bindings
+python-fcl
 
 # ========================================================
 # Installation Instructions
@@ -99,22 +111,22 @@ pybind11
 # 3. Blender installation (for scene rendering):
 #    bash quick_install_blender.sh
 #
-# 4. 验证安装：
+# 4. Verify installation:
 #    python -c "from swift.llm import VllmEngine; print('Swift OK')"
 #    python -c "import vllm; print('vLLM OK')"
 #    python -c "import torch; print(f'PyTorch OK, CUDA: {torch.cuda.is_available()}')"
 #
 # ========================================================
-# 运行示例
+# Usage Examples
 # ========================================================
 #
-# 单卡推理：
+# Single GPU inference:
 #   python infer_batch.py --batch-mode --parallel \
 #       --model /path/to/storage/ckpt/rl_v3_2 \
 #       --prompts-file /path/to/storage/datasets/llmscene/sft/test_prompt_v2.txt \
 #       --iterations 10 --output ./output/batch_results
 #
-# 4卡并行推理（4x A100）：
+# 4-GPU parallel inference (4x A100):
 #   python infer_batch.py --batch-mode --parallel \
 #       --model /path/to/storage/ckpt/rl_v3_2 \
 #       --tensor-parallel 4 \
@@ -123,7 +135,7 @@ pybind11
 #       --prompts-file /path/to/storage/datasets/llmscene/sft/test_prompt_v2.txt \
 #       --iterations 10 --output ./output/batch_results
 #
-# 使用 Objaverse 资产：
+# Using Objaverse assets:
 #   python infer_batch.py --batch-mode --parallel \
 #       --asset-source objaverse \
 #       --model /path/to/storage/ckpt/rl_v3_2 \

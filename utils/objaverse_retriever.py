@@ -128,11 +128,11 @@ def _lazy_load_sbert():
 def get_bbox_dims(annotation: Dict) -> Dict[str, float]:
     """Extract bounding box dimensions from annotation.
     
-    检查顺序:
-    1. objectOrientedBoundingBox (优先级最高)
+    Check order:
+    1. objectOrientedBoundingBox (highest priority)
     2. axisAlignedBoundingBox
-    3. thor_metadata.assetMetadata.boundingBox (Holodeck格式)
-    4. 默认值 1.0
+    3. thor_metadata.assetMetadata.boundingBox (Holodeck format)
+    4. Default value 1.0
     """
     if "objectOrientedBoundingBox" in annotation:
         bbox = annotation["objectOrientedBoundingBox"]
@@ -641,14 +641,14 @@ class ObjaverseRetriever(nn.Module):
             if not uid or len(uid) < 2:
                 continue
             
-            # 使用 uid[:2] 直接构建路径（优化：避免遍历所有子目录）
+            # Use uid[:2] to build path directly (optimization: avoid iterating all subdirectories)
             has_glb = False
             subdir_name = uid[:2]
             
             for cache_dir in glb_cache_dirs:
                 if not cache_dir.is_dir():
                     continue
-                # 直接查找 uid[:2] 子目录下的 GLB 文件
+                # Directly look for GLB file in uid[:2] subdirectory
                 cached_glb = cache_dir / subdir_name / f"{uid}.glb"
                 if cached_glb.is_file():
                     has_glb = True
