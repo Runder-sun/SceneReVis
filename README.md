@@ -250,7 +250,8 @@ python eval/voxel_eval.py \
 
 # VLM multi-dimension evaluation (requires Azure OpenAI)
 python eval/vlm_scene_eval.py \
-    --render-dir ./output/bedroom/rendered \
+    --render-dir .output/bedroom/final_renders_collection \
+    --json-dir $SCENES_DIR \
     --prompts-file split_prompts/bedroom.txt
 ```
 

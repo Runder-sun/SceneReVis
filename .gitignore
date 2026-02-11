@@ -83,3 +83,6 @@ verl/verl.egg-info/
 
 # Benchmark results
 benchmark_*results/
+
+# Project page (hosted separately at scenerevis.github.io)
+project_page/
