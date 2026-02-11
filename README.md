@@ -297,8 +297,8 @@ huggingface-cli download runder1/SceneReVis-7B --local-dir ./ckpt/SceneReVis-7B
 
 | Metric | Description | Tool |
 |--------|-------------|------|
-| Collision Rate | % of objects with physical overlaps | `myeval.py` / `voxel_eval.py` |
-| Out-of-Bounds Rate | % of objects outside room boundaries | `myeval.py` / `voxel_eval.py` |
+| Collision Rate | % of objects with physical overlaps | `myeval.py` |
+| Out-of-Bounds Rate | % of objects outside room boundaries | `myeval.py` |
 | VLM Rationality | Scene rationality score (0-10) | `vlm_scene_eval.py` |
 | VLM Spatial Layout | Layout quality score (0-10) | `vlm_scene_eval.py` |
 | VLM Accessibility | Accessibility score (0-10) | `vlm_scene_eval.py` |
