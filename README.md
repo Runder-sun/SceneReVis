@@ -34,9 +34,17 @@ SceneReVis requires **three separate conda environments** for different tasks:
 
 #### Environment 1: Inference
 
+> **Tested with**: CUDA 12.8, PyTorch 2.8.0 (`torch==2.8.0+cu128`), Python 3.11
+
 ```bash
 conda create -n scenerevis python=3.11 -y
 conda activate scenerevis
+
+# Install CUDA toolkit (must match your system CUDA driver)
+conda install -c "nvidia/label/cuda-12.8.0" cuda-toolkit -y
+
+# Install PyTorch with matching CUDA version
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
 # Install from requirements file
 pip install -r requirements_infer_batch.txt
@@ -49,11 +57,18 @@ pip install swanlab wandb msgspec python-fcl
 pip install compress_json compress_pickle open_clip_torch sentence-transformers
 ```
 
+> **Note on flash-attn**: `flash-attn` is **not required** for inference. vLLM ships with [FlashInfer](https://github.com/flashinfer-ai/flashinfer) as its default attention backend, which works out of the box. If you still want flash-attn (e.g., for other workflows), you must compile it from source with `CUDA_HOME` pointing to the **same CUDA version** used by your PyTorch (e.g., CUDA 12.8), otherwise you will get ABI mismatch errors.
+
 #### Environment 2: SFT Training
+
+> **Tested with**: CUDA 12.8, PyTorch 2.8.0 (`torch==2.8.0+cu128`), Python 3.11
 
 ```bash
 conda create -n scenerevis_sft python=3.11 -y
 conda activate scenerevis_sft
+
+# Install PyTorch with matching CUDA version
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
 # Install ms-swift framework
 pip install ms-swift
@@ -64,9 +79,14 @@ pip install -r script/sft/requirements.txt
 
 #### Environment 3: RL Training (VERL)
 
+> **Tested with**: CUDA 12.8, PyTorch 2.8.0 (`torch==2.8.0+cu128`), Python 3.12
+
 ```bash
 conda create -n verl python=3.12 -y
 conda activate verl
+
+# Install PyTorch with matching CUDA version
+pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128
 
 # Install VERL framework (official install script first)
 cd verl
@@ -106,18 +126,24 @@ source ~/.bashrc
 
 1. Download the **3D-FUTURE** asset catalog from [Alibaba Tianchi](https://tianchi.aliyun.com/dataset/98063) (requires account + approval).
 2. Download the **3D-FRONT** scene dataset from [Alibaba Tianchi](https://tianchi.aliyun.com/dataset/65347).
-3. **Preprocessing**: Follow the preprocessing pipeline from [ReSpace](https://github.com/GradientSpaces/respace) to scale and prepare 3D-FUTURE assets:
+3. **Preprocessing**: Most metadata files are already included in this repository. You only need to generate the **embeddings pickle file** (~181 MB, too large for GitHub) via the [ReSpace](https://github.com/GradientSpaces/respace) preprocessing pipeline:
    ```bash
    # Inside the ReSpace repo
    # 1. Set paths in .env file:
    #    PTH_3DFUTURE_ASSETS=/path/to/3D-FUTURE-model
    #    PTH_3DFRONT_SCENES=/path/to/3D-FRONT
-   # 2. Scale assets to real-world sizes
-   python ./src/preprocessing/3d-front/scale_assets.py
-   # 3. Pre-compute asset embeddings for retrieval (or download the cached .pickle file)
+   # 2. Pre-compute asset embeddings for retrieval
    python ./src/preprocessing/3d-front/06_compute_embeds.py
    ```
-   Alternatively, download the pre-computed embeddings cache (`model_info_3dfuture_assets_embeds.pickle`, ~174MB) from the ReSpace release.
+   Then copy the generated file into `SceneReVis/metadata/`:
+   ```bash
+   cp /path/to/respace/data/metadata/model_info_3dfuture_assets_embeds.pickle ./metadata/
+   ```
+
+   > **⚠️ Important**: The embeddings pickle file must be **~181 MB** when complete. A truncated file will cause `pickle data was truncated` errors and silently disable the asset retrieval module. Verify integrity:
+   > ```bash
+   > python -c "import pickle; data=pickle.load(open('metadata/model_info_3dfuture_assets_embeds.pickle','rb')); print('OK, keys:', list(data.keys()))"
+   > ```
 
 #### Objaverse Assets & Annotations (Optional, for `--asset-source objaverse`)
 
@@ -135,7 +161,19 @@ python -m objathor.dataset.download_features --version 2023_09_23
 > **Note**: By default these save to `~/.objathor-assets/`. You can change the path via `--path` argument and set `OBJATHOR_ASSETS_BASE_DIR` environment variable accordingly.
 
 #### Metadata Files
-The `metadata/` directory contains JSON metadata for 3D-FUTURE assets. You also need the embeddings pickle file (`model_info_3dfuture_assets_embeds.pickle`) for asset retrieval — see the 3D-FUTURE section above for how to obtain it.
+
+The `metadata/` directory contains all required files for asset retrieval:
+
+| File | Size | Source |
+|------|------|--------|
+| `model_info_3dfuture_assets.json` | ~11 MB | Included in repo |
+| `invalid_threed_front_rooms.txt` | ~0.4 MB | Included in repo |
+| `model_info_3dfuture_assets_scaled.json` | ~15 MB | Included in repo |
+| `model_info_3dfuture_assets_simple_descs.json` | ~2 MB | Included in repo |
+| `model_info_3dfuture_assets_prompts.json` | ~6 MB | Included in repo |
+| `model_info_3dfuture_assets_embeds.pickle` | **~181 MB** | Generate via [ReSpace](https://github.com/GradientSpaces/respace) |
+
+> The pickle file exceeds GitHub's 100 MB file size limit and cannot be included in the repository. You must generate it following the instructions above.
 
 ### 3. Configuration
 
@@ -145,7 +183,11 @@ source setup_env.sh
 
 # Or set manually:
 export PTH_3DFUTURE_ASSETS=/path/to/3D-FUTURE-model
+export PTH_INVALID_ROOMS=./metadata/invalid_threed_front_rooms.txt
 export PTH_ASSETS_METADATA=./metadata/model_info_3dfuture_assets.json
+export PTH_ASSETS_METADATA_SCALED=./metadata/model_info_3dfuture_assets_scaled.json
+export PTH_ASSETS_METADATA_SIMPLE_DESCS=./metadata/model_info_3dfuture_assets_simple_descs.json
+export PTH_ASSETS_METADATA_PROMPTS=./metadata/model_info_3dfuture_assets_prompts.json
 export PTH_ASSETS_EMBED=./metadata/model_info_3dfuture_assets_embeds.pickle
 
 # For Azure OpenAI (optional, for VLM feedback & initial room generation)

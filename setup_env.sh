@@ -4,7 +4,7 @@
 # Project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# 3D asset directory
+# 3D资产目录
 export PTH_3DFUTURE_ASSETS="/path/to/datasets/3d-front/3D-FUTURE-model"
 
 # Metadata files
